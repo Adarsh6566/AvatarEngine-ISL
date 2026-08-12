@@ -18,6 +18,11 @@ except Exception:  # pragma: no cover
 from .base import Extractor, Space
 from .schemas import CANONICAL_JOINTS, JointSpec, SkeletonFrame, SkeletonMeta, SkeletonStreamDict
 
+try:
+    from .tracker import assign_hands, maybe_swap_wrists
+except ImportError:
+    from tracker import assign_hands, maybe_swap_wrists  # type: ignore
+
 CONF_THRESH = 0.25  # lower for blurry frames
 VIS_THRESH = 0.4
 _HYBRID_YOLO_CACHE = None
@@ -108,6 +113,14 @@ class HybridYoloMediapipeExtractor(Extractor):
                 fps = float(fps_cap)
             frames: List[SkeletonFrame] = []
             idx = 0
+            # tracker state
+            prev_lWrist = None
+            prev_rWrist = None
+            prev_lHand = None
+            prev_rHand = None
+            # for hand tracker normalized history
+            hand_prev_l_norm = None
+            hand_prev_r_norm = None
             while True:
                 ok, frame = cap.read()
                 if not ok:
@@ -129,6 +142,15 @@ class HybridYoloMediapipeExtractor(Extractor):
                         v = kp(ci)
                         if v is not None:
                             joints[k] = v
+                    # wrist swap correction using temporal distance
+                    cur_lw = joints.get("lWrist")
+                    cur_rw = joints.get("rWrist")
+                    if cur_lw is not None and cur_rw is not None and prev_lWrist is not None and prev_rWrist is not None:
+                        new_l, new_r, swapped = maybe_swap_wrists(cur_lw, cur_rw, prev_lWrist, prev_rWrist)
+                        if swapped:
+                            print(f"[tracker] YOLO wrist swap corrected at frame {idx}")
+                            joints["lWrist"], joints["rWrist"] = new_l, new_r
+                            cur_lw, cur_rw = new_l, new_r
                     # derive torso
                     if joints.get("lShoulder") and joints.get("rShoulder"):
                         ls, rs = joints["lShoulder"], joints["rShoulder"]
@@ -151,28 +173,62 @@ class HybridYoloMediapipeExtractor(Extractor):
                         ch, hd = joints["chest"], joints["head"]  # type: ignore
                         joints["neck"] = ((ch[0] + hd[0]) / 2, (ch[1] + hd[1]) / 2, 0, 1.0)
 
-                # overlay mediapipe hands — always in image pixel space (YOLO body is pixels), then normalize flips Y
+                # overlay mediapipe hands — tracker prevents swap when close
                 if hand_landmarker is not None and mp is not None:
                     try:
                         rgb = _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
                         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)  # type: ignore
                         hand_res = hand_landmarker.detect(mp_image)  # type: ignore
                         if hand_res.hand_landmarks and hand_res.handedness:
+                            detected = []
                             for lm_list, handed in zip(hand_res.hand_landmarks, hand_res.handedness):
-                                cat = handed[0].category_name if handed else "Unknown"
-                                is_left = cat.lower() == "left"
-                                prefix = "l" if is_left else "r"
-                                # YOLO + hands both in pixel space so after to_view_space Y-flip is consistent
-                                # Do not anchor to wrist with tiny delta — use absolute hand position in image
+                                cat = handed[0].category_name if handed and handed[0].category_name else "Unknown"
+                                conf = float(handed[0].score) if handed and hasattr(handed[0], 'score') else 0.5
+                                p0 = lm_list[0]
+                                centroid = (float(p0.x)*w, float(p0.y)*h, float(p0.z)*w, conf)
+                                centroid_norm = (float(p0.x), float(p0.y))
+                                detected.append({"lm_list": lm_list, "handedness": cat, "conf": conf, "centroid": centroid, "centroid_norm": centroid_norm})
+                            # temporal assignment
+                            prev_l_j = (hand_prev_l_norm[0]*w, hand_prev_l_norm[1]*h, 0, 1.0) if hand_prev_l_norm else prev_lHand
+                            prev_r_j = (hand_prev_r_norm[0]*w, hand_prev_r_norm[1]*h, 0, 1.0) if hand_prev_r_norm else prev_rHand
+                            det_for_tracker = []
+                            for d in detected:
+                                det_for_tracker.append({"lm_list": d["lm_list"], "handedness": d["handedness"], "conf": d["conf"], "centroid": (d["centroid_norm"][0], d["centroid_norm"][1], 0, d["conf"]), "centroid_norm": d["centroid_norm"]})
+                            # normalize prev for tracker (0-1)
+                            prev_l_norm_j = (hand_prev_l_norm[0], hand_prev_l_norm[1], 0, 1.0) if hand_prev_l_norm else None
+                            prev_r_norm_j = (hand_prev_r_norm[0], hand_prev_r_norm[1], 0, 1.0) if hand_prev_r_norm else None
+                            assigned = assign_hands(det_for_tracker, prev_l_norm_j, prev_r_norm_j)
+                            if assigned["l"] is not None:
+                                hand_prev_l_norm = assigned["l"]["centroid_norm"]
+                            if assigned["r"] is not None:
+                                hand_prev_r_norm = assigned["r"]["centroid_norm"]
+                            for side, det in [("l", assigned["l"]), ("r", assigned["r"])]:
+                                if det is None:
+                                    continue
+                                lm_list = det["lm_list"]
                                 def hp(i):
                                     p = lm_list[i]
                                     return (float(p.x) * w, float(p.y) * h, float(p.z) * w, 1.0)
-
-                                joints[f"{prefix}Hand"] = hp(0)
-                                for k, ii in [("Thumb1", 2), ("Thumb2", 4), ("Index1", 5), ("Index2", 8), ("Middle1", 9), ("Middle2", 12), ("Ring1", 13), ("Ring2", 16), ("Pinky1", 17), ("Pinky2", 20)]:
-                                    joints[f"{prefix}{k}"] = hp(ii)
+                                joints[f"{side}Hand"] = hp(0)
+                                for k2, ii in [("Thumb1", 2), ("Thumb2", 4), ("Index1", 5), ("Index2", 8), ("Middle1", 9), ("Middle2", 12), ("Ring1", 13), ("Ring2", 16), ("Pinky1", 17), ("Pinky2", 20)]:
+                                    joints[f"{side}{k2}"] = hp(ii)
+                            if len(detected)==2:
+                                # log if tracker corrected vs naive
+                                naive = {d["handedness"].lower(): d for d in detected}
+                                if assigned["l"] and naive.get("left") and assigned["l"]["lm_list"] is not naive["left"]["lm_list"]:
+                                    print(f"[tracker] hybrid hand swap corrected at frame {idx}")
+                        # update hand prev for next frame
+                        if joints.get("lHand") is not None:
+                            prev_lHand = joints["lHand"]
+                        if joints.get("rHand") is not None:
+                            prev_rHand = joints["rHand"]
                     except Exception as e:
                         print(f"[hybrid] hand detect frame {idx} err: {e}")
+                # update wrist prev for next frame
+                if joints.get("lWrist") is not None:
+                    prev_lWrist = joints["lWrist"]
+                if joints.get("rWrist") is not None:
+                    prev_rWrist = joints["rWrist"]
 
                 frames.append(SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints))
                 idx += 1

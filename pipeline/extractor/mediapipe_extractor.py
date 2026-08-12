@@ -18,6 +18,11 @@ from .base import Extractor, Space
 from .schemas import CANONICAL_JOINTS, JointSpec, SkeletonFrame, SkeletonMeta, SkeletonStreamDict
 
 try:
+    from .tracker import assign_hands, maybe_swap_wrists
+except ImportError:
+    from tracker import assign_hands, maybe_swap_wrists  # type: ignore
+
+try:
     import cv2
     import numpy as np
 except Exception:  # pragma: no cover
@@ -222,6 +227,11 @@ def _try_mediapipe_tasks_extract(video_path: Path, space: Space, fps: float) -> 
     frames: List[SkeletonFrame] = []
     idx = 0
     detected_frames = 0
+    # temporal tracker state for hands/wrists
+    prev_lHand = None
+    prev_rHand = None
+    prev_lWrist = None
+    prev_rWrist = None
     while True:
         ok, frame = cap.read()
         if not ok:
@@ -319,29 +329,91 @@ def _try_mediapipe_tasks_extract(video_path: Path, space: Space, fps: float) -> 
                         joints["neck"] = ((ch[0] + hd[0]) / 2, (ch[1] + hd[1]) / 2, (ch[2] + hd[2]) / 2, 1.0)
                     if joints.get("lShoulder") or joints.get("rShoulder") or joints.get("head"):
                         detected_frames += 1
+                    # wrist swap correction for pose (fast crossing)
+                    cur_lw = joints.get("lWrist")
+                    cur_rw = joints.get("rWrist")
+                    if cur_lw is not None and cur_rw is not None and prev_lWrist is not None and prev_rWrist is not None:
+                        new_l, new_r, swapped = maybe_swap_wrists(cur_lw, cur_rw, prev_lWrist, prev_rWrist)
+                        if swapped:
+                            print(f"[tracker] pose wrist swap corrected at frame {idx}")
+                            joints["lWrist"], joints["rWrist"] = new_l, new_r
 
-            # hands — correctly anchored to pose wrist in world space
+            # hands — tracker-based assignment to prevent swap when close/overlapping (C)
             if hand_landmarker is not None:
-                hand_res = hand_landmarker.detect(mp_image)
-                if hand_res.hand_landmarks and hand_res.handedness:
+                try:
+                    hand_res = hand_landmarker.detect(mp_image)
+                except Exception as e:
+                    print(f"[mediapipe] hand detect err: {e}")
+                    hand_res = None
+                if hand_res and hand_res.hand_landmarks and hand_res.handedness:
+                    # build detected list with centroids in normalized image space for tracking
+                    detected = []
                     for lm_list, handed in zip(hand_res.hand_landmarks, hand_res.handedness):
-                        cat = handed[0].category_name if handed else "Unknown"  # Left/Right (mirrored view)
-                        is_left = cat.lower() == "left"
-                        prefix = "l" if is_left else "r"
-                        # anchor: pose wrist for this hand (global)
+                        cat = handed[0].category_name if handed and handed[0].category_name else "Unknown"
+                        conf = float(handed[0].score) if handed and hasattr(handed[0], 'score') else 0.5
+                        # centroid as wrist normalized
+                        p0 = lm_list[0]
+                        centroid = (float(p0.x), float(p0.y), 0.0, conf)
+                        # also keep normalized centroid for tracker (0-1)
+                        centroid_norm = (float(p0.x), float(p0.y))
+                        detected.append({"lm_list": lm_list, "handedness": cat, "conf": conf, "centroid": centroid, "centroid_norm": centroid_norm, "handedness_raw": handed})
+                    # use tracker with prev normalized centroids
+                    prev_l_cent = (prev_lHand[0], prev_lHand[1]) if prev_lHand and space == "image" else None
+                    # for world, prev is meters, need to convert to normalized via w/h approx: use image centroid history
+                    # keep separate prev norm history
+                    if not hasattr(hand_landmarker, "_prev_l_norm"):
+                        hand_landmarker._prev_l_norm = None  # type: ignore
+                        hand_landmarker._prev_r_norm = None  # type: ignore
+                    prev_l_norm = getattr(hand_landmarker, "_prev_l_norm")
+                    prev_r_norm = getattr(hand_landmarker, "_prev_r_norm")
+                    # build prev JointVal for tracker in normalized space
+                    prev_l_j = (prev_l_norm[0], prev_l_norm[1], 0, 1.0) if prev_l_norm else None
+                    prev_r_j = (prev_r_norm[0], prev_r_norm[1], 0, 1.0) if prev_r_norm else None
+                    # also consider wrist positions for better assignment
+                    prev_lw_j = None
+                    prev_rw_j = None
+                    if prev_lWrist is not None:
+                        # convert wrist to normalized if image, else keep meters but tracker uses normalized, so skip
+                        if space == "image":
+                            prev_lw_j = (prev_lWrist[0]/w, prev_lWrist[1]/h, 0, 1.0) if w and h else None
+                        else:
+                            # for world, use normalized centroid history instead
+                            prev_lw_j = None
+                    if prev_rWrist is not None and space == "image":
+                        prev_rw_j = (prev_rWrist[0]/w, prev_rWrist[1]/h, 0, 1.0) if w and h else None
+                    # prepare detected for tracker in normalized space
+                    det_for_tracker = []
+                    for d in detected:
+                        det_for_tracker.append({"lm_list": d["lm_list"], "handedness": d["handedness"], "conf": d["conf"], "centroid": (d["centroid_norm"][0], d["centroid_norm"][1], 0, d["conf"]), "centroid_norm": d["centroid_norm"]})
+                    assigned = assign_hands(det_for_tracker, prev_l_j, prev_r_j, prev_lw_j, prev_rw_j)
+                    # update prev norm
+                    if assigned["l"] is not None:
+                        hand_landmarker._prev_l_norm = assigned["l"]["centroid_norm"]  # type: ignore
+                    # keep previous if no detection for that side (avoid flicker, but don't update)
+                    if assigned["r"] is not None:
+                        hand_landmarker._prev_r_norm = assigned["r"]["centroid_norm"]  # type: ignore
+                    # now write joints for assigned hands
+                    for side, det in [("l", assigned["l"]), ("r", assigned["r"])]:
+                        if det is None:
+                            continue
+                        lm_list = det["lm_list"]
+                        prefix = side
                         anchor = joints.get(f"{prefix}Wrist")
-                        # if anchor missing (pose not detected), fallback to image-space hand without anchor
+                        # find original index for hand_world
                         use_world = space == "world" and hasattr(hand_res, "hand_world_landmarks") and hand_res.hand_world_landmarks
-                        if use_world and anchor is not None:
+                        idx_hand = None
+                        if use_world:
                             try:
                                 idx_hand = hand_res.hand_landmarks.index(lm_list)
+                            except ValueError:
+                                idx_hand = None
+                        if use_world and anchor is not None and idx_hand is not None:
+                            try:
                                 wlm = hand_res.hand_world_landmarks[idx_hand] if idx_hand < len(hand_res.hand_world_landmarks) else None
                                 if wlm:
-                                    # hand world is wrist-centered; offset by pose wrist
                                     ax, ay, az = anchor[0], anchor[1], anchor[2]
                                     def hp_world(i):
                                         p = wlm[i]
-                                        # local hand delta + pose wrist anchor
                                         return (ax + float(p.x), ay + float(p.y), az + float(p.z), 1.0)
                                     def hp(i): return hp_world(i)
                                 else:
@@ -351,7 +423,6 @@ def _try_mediapipe_tasks_extract(video_path: Path, space: Space, fps: float) -> 
                                     p = lm_list[i]
                                     if space == "image":
                                         return (float(p.x) * w, float(p.y) * h, float(p.z) * w, 1.0)
-                                    # fallback: use wrist anchor + normalized delta * small scale
                                     if anchor is not None:
                                         return (anchor[0] + (float(p.x)-0.5)*0.18, anchor[1] + (0.5-float(p.y))*0.18, anchor[2] + float(p.z)*0.05, 1.0)
                                     return (float(p.x), float(p.y), float(p.z), 1.0)
@@ -360,13 +431,10 @@ def _try_mediapipe_tasks_extract(video_path: Path, space: Space, fps: float) -> 
                                 p = lm_list[i]
                                 if space == "image":
                                     return (float(p.x) * w, float(p.y) * h, float(p.z) * w, 1.0)
-                                # world without hand_world — derive from anchor + image delta
                                 if anchor is not None:
                                     return (anchor[0] + (float(p.x)-0.5)*0.18, anchor[1] + (0.5-float(p.y))*0.18, anchor[2] + float(p.z)*0.05, 1.0)
                                 return (float(p.x), float(p.y), float(p.z), 1.0)
-
                         try:
-                            # don't overwrite pose wrist-Hand if already set by pose; but hand detail is better
                             joints[f"{prefix}Hand"] = hp(0)
                             joints[f"{prefix}Thumb1"] = hp(2)
                             joints[f"{prefix}Thumb2"] = hp(4)
@@ -380,6 +448,22 @@ def _try_mediapipe_tasks_extract(video_path: Path, space: Space, fps: float) -> 
                             joints[f"{prefix}Pinky2"] = hp(20)
                         except Exception:
                             pass
+                    # log swap correction
+                    if len(detected) == 2:
+                        # check if assignment differs from naive handedness
+                        naive_l = next((d for d in detected if d["handedness"].lower()=="left"), None)
+                        naive_r = next((d for d in detected if d["handedness"].lower()=="right"), None)
+                        if assigned["l"] is not None and naive_l is not None and assigned["l"]["lm_list"] is not naive_l["lm_list"]:
+                            print(f"[tracker] hand swap corrected at frame {idx}: handedness {naive_l['handedness']}/{naive_r['handedness'] if naive_r else 'none'} -> tracked l/r swapped due to proximity")
+                # update prev wrist for next frame (for tracking)
+                if joints.get("lWrist") is not None:
+                    prev_lWrist = joints["lWrist"]
+                if joints.get("rWrist") is not None:
+                    prev_rWrist = joints["rWrist"]
+                if joints.get("lHand") is not None:
+                    prev_lHand = joints["lHand"]
+                if joints.get("rHand") is not None:
+                    prev_rHand = joints["rHand"]
         except Exception as e:
             print(f"[mediapipe] frame {idx} error: {e}")
 

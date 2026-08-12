@@ -15,6 +15,11 @@ from .base import Extractor, Space
 from .mediapipe_extractor import _dummy_stream
 from .schemas import CANONICAL_JOINTS, JointSpec, SkeletonFrame, SkeletonMeta, SkeletonStreamDict
 
+try:
+    from .tracker import maybe_swap_wrists
+except ImportError:
+    from tracker import maybe_swap_wrists  # type: ignore
+
 
 _YOLO_CACHE = None  # global cache to avoid reload per request
 _YOLO_CACHE_PATH = None
@@ -78,6 +83,8 @@ class YoloExtractor(Extractor):
                 fps = 30.0
             frames: List[SkeletonFrame] = []
             idx = 0
+            prev_lWrist = None
+            prev_rWrist = None
             while True:
                 ok, frame = cap.read()
                 if not ok:
@@ -102,6 +109,14 @@ class YoloExtractor(Extractor):
                         v = kp(idx)
                         if v is not None:
                             joints[k] = v
+                    # wrist swap correction for fast crossing
+                    cur_lw = joints.get("lWrist")
+                    cur_rw = joints.get("rWrist")
+                    if cur_lw is not None and cur_rw is not None and prev_lWrist is not None and prev_rWrist is not None:
+                        new_l, new_r, swapped = maybe_swap_wrists(cur_lw, cur_rw, prev_lWrist, prev_rWrist)
+                        if swapped:
+                            print(f"[tracker] yolo wrist swap corrected at frame {idx}")
+                            joints["lWrist"], joints["rWrist"] = new_l, new_r
                     # derive torso only if both sides visible
                     if joints.get("lShoulder") and joints.get("rShoulder"):
                         ls, rs = joints["lShoulder"], joints["rShoulder"]
@@ -134,6 +149,10 @@ class YoloExtractor(Extractor):
                         joints["rHand"] = (rw[0], rw[1] + 4, 0, 0.5)
 
                 frames.append(SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints))
+                if joints.get("lWrist") is not None:
+                    prev_lWrist = joints["lWrist"]
+                if joints.get("rWrist") is not None:
+                    prev_rWrist = joints["rWrist"]
                 idx += 1
             cap.release()
             if not frames:
