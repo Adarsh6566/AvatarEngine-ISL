@@ -1,0 +1,48 @@
+# Universal config — single source of truth for ports, CORS, validation, animation.
+# Env vars override these values (FRONTEND_ORIGIN, VITE_API_URL). See .env.example.
+
+backend:
+  host: "127.0.0.1" # use 0.0.0.0 in Docker
+  port: 8000
+  cors:
+    # Comma-separated origins — must match Vite dev server.
+    frontend_origin: "http://localhost:5173,http://127.0.0.1:5173"
+    allow_methods: ["GET", "POST", "OPTIONS"]
+    allow_headers: ["Content-Type", "Authorization"]
+  validation:
+    text_max_length: 500
+    text_min_length: 1
+  rate_limit:
+    requests_per_min: 30
+    window_seconds: 60
+  log_level: "INFO"
+  max_body_bytes: 8192
+  dictionary:
+    path: "backend/vocabulary.json" # generated artifact — offline pipeline writes here (or infra/vocab.json)
+    manifest_path: "data/motion_manifest.json" # generated snapshot of public/animations/*.vrma — now in data/ (not inside frontend)
+
+frontend:
+  dev_port: 5173
+  # If set, frontend calls this directly; if empty, uses /api/* proxy (vite.config.ts).
+  api_url: "http://127.0.0.1:8000"
+  timeout_ms: 8000
+  validation:
+    text_max_length: 500
+
+animation:
+  gesture_fade_seconds: 0.6
+  min_hold_seconds: 1.5
+  max_hold_seconds: 3
+  missing_motion_seconds: 1.5
+  word_gap_seconds: 0
+  fingerspell:
+    hold_seconds: 2
+    fade_seconds: 0.25
+  playback_speeds: [1, 2, 3, 4, 5]
+  default_speed: 1
+
+avatar:
+  model_path: "/models/AvatarSample_C.vrm"
+  concurrency: 6
+  # Word signs prioritized first during load (core vocab).
+  word_priority: ["HELLO", "THANKYOU", "PLEASE", "SORRY", "YES", "NO", "ME", "YOU", "BYE"]

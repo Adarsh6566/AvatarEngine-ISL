@@ -1,0 +1,18 @@
+PHASE 2 — SMPLest-X CAPTURE — STATUS: EXPORTER VERIFIED, INFERENCE PENDING COLAB
+
+Input: offline/datasets/isl_greeting/hello/MVI_0029.MOV (5-sign greetings spike)
+Output: offline/output/smplx/isl_hello_MVI_0029.npz + validation report
+
+1. Verify exporter [DONE 2026-08-11] — offline/colab/export_smplestx_npz.py collects all 9 tensors (root/body/lhand/rhand/jaw/shape/expr/cam_trans/joint_cam), 165-dim (15*3*2 hands), FPS 25, single-person abort (>1 raises), finite checks. Mirrors main/inference.py + SMPLest_X.py test-mode out dict (no invented names).
+
+2. Real inference [PENDING — requires Colab T4 + smplest_x_h checkpoint + SMPL-X body models; cannot run on Mac]
+- Preserve frame order, FPS, signer, camera-frame coords; never drop silently
+- Per frame: 0 → skipped+recorded, 1 → process, >1 → abort
+
+3. NPZ validation [TOOL READY — offline/tools/validate_npz.py] — checks (N,165), (N,3), (N,J,3) J≥55, 30 finger joints, finite, FPS; prints J table via _smplx_joint_label (55 names + ext).
+
+4. Visual validation [PENDING] — neutral/hand-open/hand-motion/large motion frames after NPZ exists.
+
+5. Output — offline/output/smplx/isl_hello_MVI_0029.npz + metadata (frame_count, fps, J, joint_names, missing_frames, person_counts, betas_shape). See offline/output/smplx/README.md for exact command.
+
+Success when: exporter verified (done) → real CUDA inference → validated NPZ → visual inspection. Graph work starts after.

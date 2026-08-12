@@ -1,0 +1,13 @@
+PHASE 4 — GRAPH MATCHING + EEMGM — STATUS: IMPLEMENTED 2026-08-11 (offline, synthetic validated)
+
+Input: SkeletonGraphSequence (Phase 3). Offline only — not FastAPI.
+
+1. Frame matching [DONE] offline/motion_analysis/graph_matching.py: d_v/d_e → M_V/M_E/combined (query×dataset), raw distance vs mean score vs combined; m_S^t as mean. Distinguishes.
+
+2. Normalization [DONE] normalize_modes() → raw/pelvis_centered/scale_normalized (report separately; never claim Vicon validation).
+
+3. Hand-aware [DONE] body/left_hand/right_hand/fingers/overall via _region_indices (SMPL-X names).
+
+4. EEMGM [DONE] offline/motion_analysis/eemgm.py: SignDatabase/SignEntry, Q_k 10-frame chunks, threshold 0.2 + consecutive 5 configurable, early exit + estimated_after_frame, final validation (reject if poor). Synthetic: query same vs diff → same 0.0 < diff 0.28, predicted hello early True, comps 200 vs full 800 (reduction 0.75, speedup 1.34).
+
+5. Modes [DONE] compare_full_vs_eemgm() → full_comparisons, eemgm_comparisons, speedup, reduction. Synthetic same < diff holds. Not yet on real SMPL-X NPZ (pending Phase 2 inference). SMPL-X 55 vs 57-marker documented.

@@ -1,0 +1,78 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Frontend — Vite + Node (frontend/ is canonical, root wrapper delegates)
+node_modules
+frontend/node_modules
+frontend/dist
+dist
+dist-ssr
+*.local
+.env
+.env.local
+
+# Python — backend + offline
+.venv
+venv
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Datasets / raw videos / images - DO NOT TRACK (offline/datasets is 1.5G, 107 MOVs)
+offline/datasets/
+datasets/
+**/datasets/
+*.MOV
+*.mov
+*.MP4
+*.mp4
+*.AVI
+*.avi
+*.mkv
+*.webm
+*.m4v
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
+*.png
+*.PNG
+*.gif
+*.bmp
+*.tiff
+*.npz
+*.npy
+
+# Offline research outputs (generated, large - 7.6M json/png/vrma)
+offline/output/
+offline/.venv/
+# keep public assets (.vrma/.vrm) - do NOT ignore
+public/models/*.log
+
+# Misc
+*.tmp
+*.temp
+
+# Python virtual environments
+.venv/
+venv/
+__pycache__/
+*.pyc

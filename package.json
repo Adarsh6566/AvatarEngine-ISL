@@ -1,0 +1,12 @@
+{
+  "name": "avatar-engine",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
+    "dev:all": "node scripts/dev.mjs"
+  }
+}

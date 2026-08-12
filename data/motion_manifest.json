@@ -1,0 +1,355 @@
+{
+    "HELLO": {
+        "id": "HELLO",
+        "motionId": "video_hello_v2",
+        "assetPath": "/animations/hello_isl.vrma",
+        "duration": 2.52,
+        "dataset": "video"
+    },
+    "THANKYOU": {
+        "id": "THANKYOU",
+        "motionId": "motion_002",
+        "assetPath": "/animations/Thankyou_sign.vrma",
+        "duration": 1.8
+    },
+    "PLEASE": {
+        "id": "PLEASE",
+        "motionId": "motion_003",
+        "assetPath": "/animations/please_sign.vrma",
+        "duration": 2.0
+    },
+    "SORRY": {
+        "id": "SORRY",
+        "motionId": "motion_004",
+        "assetPath": "/animations/sorry_sign.vrma",
+        "duration": 2.2
+    },
+    "YES": {
+        "id": "YES",
+        "motionId": "motion_005",
+        "assetPath": "/animations/yes_sign.vrma",
+        "duration": 1.5
+    },
+    "NO": {
+        "id": "NO",
+        "motionId": "motion_006",
+        "assetPath": "/animations/no_sign.vrma",
+        "duration": 1.6
+    },
+    "ME": {
+        "id": "ME",
+        "motionId": "motion_007",
+        "assetPath": "/animations/Me_sign.vrma",
+        "duration": 1.9
+    },
+    "YOU": {
+        "id": "YOU",
+        "motionId": "motion_008",
+        "assetPath": "/animations/You_sign1.vrma",
+        "duration": 1.9
+    },
+    "BYE": {
+        "id": "BYE",
+        "motionId": "motion_009",
+        "assetPath": "/animations/bye_sign.vrma",
+        "duration": 2.0
+    },
+    "A": {
+    "motionId": "letter_a",
+    "assetPath": "/animations/A_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+
+"B": {
+    "motionId": "letter_b",
+    "assetPath": "/animations/B_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"C": {
+    "motionId": "letter_c",
+    "assetPath": "/animations/C_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+
+"D": {
+    "motionId": "letter_d",
+    "assetPath": "/animations/D_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+
+},
+"E": {
+    "motionId": "letter_e",
+    "assetPath": "/animations/E_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+
+"F": {
+    "motionId": "letter_f",
+    "assetPath": "/animations/F_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"G": {
+    "motionId": "letter_g",
+    "assetPath": "/animations/G_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+
+"H": {
+    "motionId": "letter_h",
+    "assetPath": "/animations/H_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+
+},
+"I": {
+    "motionId": "letter_i",
+    "assetPath": "/animations/I_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+
+"J": {
+    "motionId": "letter_j",
+    "assetPath": "/animations/J_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"K": {
+    "motionId": "letter_k",
+    "assetPath": "/animations/K_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+
+"L": {
+    "motionId": "letter_l",
+    "assetPath": "/animations/L_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+
+},
+"M": {
+    "motionId": "letter_m",
+    "assetPath": "/animations/M_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+
+"N": {
+    "motionId": "letter_n",
+    "assetPath": "/animations/N_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"O": {
+    "motionId": "letter_o",
+    "assetPath": "/animations/O_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+
+"P": {
+    "motionId": "letter_p",
+    "assetPath": "/animations/P_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+
+},
+
+"Q": {
+    "motionId": "letter_q",
+    "assetPath": "/animations/Q_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"R": {
+    "motionId": "letter_r",
+    "assetPath": "/animations/R_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+
+"S": {
+    "motionId": "letter_s",
+    "assetPath": "/animations/s_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+    },
+
+"T": {
+    "motionId": "letter_t",
+    "assetPath": "/animations/T_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"U": {
+    "motionId": "letter_u",
+    "assetPath": "/animations/U_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"V": {
+    "motionId": "letter_v",
+    "assetPath": "/animations/V_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"W": {
+    "motionId": "letter_w",
+    "assetPath": "/animations/W_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"X": {
+    "motionId": "letter_x",
+    "assetPath": "/animations/X_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"Y": {
+    "motionId": "letter_y",
+    "assetPath": "/animations/Y_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"Z": {
+    "motionId": "letter_z",
+    "assetPath": "/animations/Z_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+},
+"FREAKY": {
+    "id": "FREAKY",
+    "motionId": "word_freaky",
+    "assetPath": "/animations/freaky.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+    },
+"SWAG": {
+    "id": "SWAG",
+    "motionId": "word_swag",
+    "assetPath": "/animations/swag_sign.vrma",
+    "duration": 1.2,
+    "dataset": "manual",
+    "signer": "default",
+    "handedness": "right",
+    "language": "ISL",
+    "version": "1.0"
+    }
+}
+

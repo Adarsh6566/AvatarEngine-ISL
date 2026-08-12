@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+# Frontend — Vite (frontend/ is canonical, dist is build output)
+frontend/node_modules
+frontend/dist
+dist
+dist-ssr
+*.local
+.env
+.env.local
+
+# Python — backend + offline
+.venv
+venv
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Offline research outputs (generated, large)
+offline/output/smplx/*.npz
+offline/output/evaluation/plots/*
+offline/.venv
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Datasets / large binaries
+/datasets
+*datasets
+/output
+public/models/*.log
+
+# Misc
+*.tmp
+*.temp

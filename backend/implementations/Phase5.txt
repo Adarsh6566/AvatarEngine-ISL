@@ -1,0 +1,20 @@
+PHASE 5 — INTEGRATION + EVALUATION — STATUS: IMPLEMENTED 2026-08-11 (offline, synthetic)
+
+Integration (offline only) [DONE]:
+video → SMPLest-X → SMPL-X → graph → motion frames → optional EEMGM → sign label — via `python -m offline.motion_analysis.recognize --query query.npz --database offline/output/sign_database` (graph/eemgm). Keeps VRM/VRMA/motion_manifest/AvatarController/frontend unchanged (production never imports offline). SMPL-X adapter (`offline/motionpipe/smplx_adapter.py`) produces HumanMotionSequence with explicit filenames (not overwriting .vrma). A/B MediaPipe→VRM vs SMPLest-X→VRM planned (requires real NPZ).
+
+Evaluation (measure, don't claim) [DONE synthetic]:
+Baselines A:MediaPipe proxy, B:SMPLest-X raw, C:+graph, D:+EEMGM — synthetic N=30 J=55 shows same 0.289 < diff 0.298 (PASS), retention 100% (random high motion, not paper 25%), full 3600 vs EEMGM 600 comps (0.83 reduction, 2.39x speedup), motion mean_velocity 0.17. Real signer-disjoint accuracy/precision/recall/F1 pending separate recordings.
+
+Output [DONE]: offline/output/evaluation/{metrics.json (paper_reported vs our_measured vs assumptions), summary.csv, plots/, comparison_report.md} — synthetic demo; real SMPLest-X NPZ will replace.
+
+Final decision pending real data: does SMPLest-X improve motion? graph reduce compute? EEMGM speed up? Remove what doesn't help.
+
+        ISL AVATAR ENGINE
+             │
+   ┌─────────┴─────────┐
+   ↓                   ↓
+PRODUCTION          RESEARCH
+English→Gloss    ISL Video→SMPLest-X→3D→Graph→Motion→EEMGM→Sign
+Motion Catalog               (offline, never blocks production)
+VRMA→VRM Avatar

@@ -1,0 +1,33 @@
+PHASE 1 — REPO STRUCTURE & HYGIENE (PRIORITY — DO FIRST)
+
+Problem: Files are scattered. Root mixes infra (Docker, config.yaml, run.sh), app code (src/, backend/, public/), and docs. Future dev needs a clean layout.
+
+Goal: One-time move, no arch redesign, validated by tsc/build/health.
+
+1. Target layout (proposed)
+avatar-engine/
+  apps/web/        ← frontend (src/, public/, index.html, vite.config.ts)
+  apps/api/        ← backend (backend/*)
+  packages/core/   ← RenderEngine, Clock (VRM-free)
+  packages/avatar/ ← AvatarController + animation/ + loading/
+  packages/skeleton/ ← SkeletonStream + viewer
+  infra/           ← Dockerfile, docker-compose.yml, nginx.conf, config.yaml, .env.example
+  scripts/         ← run.sh, dev.mjs
+  docs/            ← AGENTS.md, ARCHITECTURE.md, PIPELINE.md, CHANGELOG.md
+  offline/         ← datasets, colab, motionpipe (untouched)
+
+Keep as is: offline/, public/animations/*.vrma (large binaries, don't move yet)
+
+2. Remaining cleanup (from old Phase 1, still pending)
+- Verify dead orphans then delete: public/animations/{Please.vrma, hello_sign.vrma, isl_greeting__hello__MVI_0029.vrma}
+- Dedup public/models/avatar.vrm vs AvatarSample_C.vrm (APP_CONFIG.avatar.modelPath uses Sample_C; delete avatar.vrm after Docker/nginx confirms)
+- backend/mapper.py: map_gloss() — keep as deprecated passthrough, add DeprecationWarning (don't delete file)
+- offline/README.md — still says "NotImplementedError"; update only after Phase 2 validates SMPLest-X
+
+3. Validation after move
+- npx tsc --noEmit (0 errors)
+- npm run build (3 chunks)
+- curl /health + /ready, docker compose config + up --build (backend healthy)
+- grep for stale imports (src/motion, src/avatar) — must stay no cycle
+
+Do not touch: VRM/VRMA runtime, research graph code, SMPLest-X exporter.
