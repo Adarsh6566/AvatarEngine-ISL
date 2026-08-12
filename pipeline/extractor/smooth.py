@@ -29,7 +29,19 @@ for j in MOBILE:
 for j in FINE:
     PRESETS[j] = (0.85, 0.002)  # almost raw
 
+# abrupt change thresholds — if delta > this, treat as blurry-frame jump and smooth more heavily
+ABRUPT_THRESH: Dict[str, float] = {}
+for j in STABLE:
+    ABRUPT_THRESH[j] = 0.08
+for j in SEMI:
+    ABRUPT_THRESH[j] = 0.10
+for j in MOBILE:
+    ABRUPT_THRESH[j] = 0.12
+for j in FINE:
+    ABRUPT_THRESH[j] = 0.15
+
 DEFAULT = (0.35, 0.010)
+DEFAULT_ABRUPT = 0.12
 
 
 def _dist(a: JointVal, b: JointVal) -> float:
@@ -53,10 +65,9 @@ def smooth_stream(stream: SkeletonStreamDict) -> SkeletonStreamDict:
             prv = prev.get(name)
 
             if cur is None:
-                # if cur missing but prev exists, hold prev for 2 frames then drop (avoids flicker)
-                # simple: keep prev if had recent detection
-                out_joints[name] = prv if prv is not None and _dist(prv, prv) < 999 else None
-                # do not update prev on missing (keep last real)
+                # keep as None for gap — second pass will linearly interpolate across blurry gap
+                out_joints[name] = None
+                # do not update prev (keep last real for next valid)
                 continue
 
             if prv is None:
@@ -65,6 +76,16 @@ def smooth_stream(stream: SkeletonStreamDict) -> SkeletonStreamDict:
                 continue
 
             d = _dist(prv, cur)
+            abrupt = ABRUPT_THRESH.get(name, DEFAULT_ABRUPT)
+            # if abrupt jump (blurry gap), interpolate: stable -> heavy smooth, fine -> keep responsive
+            use_alpha = alpha
+            if d > abrupt:
+                if name in FINE:
+                    use_alpha = min(alpha, 0.45)  # hands stay accurate even on abrupt
+                elif name in MOBILE:
+                    use_alpha = min(alpha, 0.25)
+                else:
+                    use_alpha = min(alpha, 0.12)  # stable heavy smooth
             if d < deadzone:
                 # within allowance — keep previous to kill jitter
                 out_joints[name] = prv
@@ -75,10 +96,10 @@ def smooth_stream(stream: SkeletonStreamDict) -> SkeletonStreamDict:
                 nz = prv[2] + (cur[2]-prv[2])*0.05
                 prev[name] = (nx, ny, nz, cur[3])
             else:
-                # EMA
-                nx = prv[0]*(1-alpha) + cur[0]*alpha
-                ny = prv[1]*(1-alpha) + cur[1]*alpha
-                nz = prv[2]*(1-alpha) + cur[2]*alpha
+                # EMA with possibly reduced alpha for abrupt
+                nx = prv[0]*(1-use_alpha) + cur[0]*use_alpha
+                ny = prv[1]*(1-use_alpha) + cur[1]*use_alpha
+                nz = prv[2]*(1-use_alpha) + cur[2]*use_alpha
                 smoothed = (nx, ny, nz, cur[3])
                 out_joints[name] = smoothed
                 prev[name] = smoothed
@@ -91,6 +112,34 @@ def smooth_stream(stream: SkeletonStreamDict) -> SkeletonStreamDict:
                 # keep X,Y as smoothed, force Z toward 0 with 90% damping
                 out_joints[vname] = (v[0], v[1], v[2]*0.12, v[3])
         new_frames.append(SkeletonFrame(index=f.index, timestamp=f.timestamp, joints=out_joints))
+
+    # second pass: fill blurry-frame gaps (consecutive None) with linear interpolation
+    # this makes abrupt re-appearances become smooth ramps over gap length
+    MAX_GAP = 12  # interpolate up to 12 frames (~0.4s @30fps) of blur
+    for joint_name in [j.name for j in stream.meta.joints]:
+        # collect valid indices and values
+        valid = [(i, f.joints.get(joint_name)) for i, f in enumerate(new_frames) if f.joints.get(joint_name) is not None]
+        if len(valid) < 2:
+            continue
+        for k in range(len(valid)-1):
+            i0, v0 = valid[k]
+            i1, v1 = valid[k+1]
+            gap = i1 - i0 - 1
+            if 1 <= gap <= MAX_GAP:
+                for g in range(1, gap+1):
+                    alpha = g / (gap+1)
+                    interp = (
+                        v0[0]*(1-alpha) + v1[0]*alpha,
+                        v0[1]*(1-alpha) + v1[1]*alpha,
+                        v0[2]*(1-alpha) + v1[2]*alpha,
+                        max(v0[3], v1[3]),
+                    )
+                    # replace None with interp in gap frames
+                    jf = new_frames[i0+g]
+                    # need to copy joints dict (create new Frame)
+                    new_joints = dict(jf.joints)
+                    new_joints[joint_name] = interp
+                    new_frames[i0+g] = SkeletonFrame(index=jf.index, timestamp=jf.timestamp, joints=new_joints)
 
     meta = stream.meta.model_copy()
     # tag estimator
