@@ -8,7 +8,8 @@ Every file modification in this repository is recorded here. See `AGENTS.md` §5
 
 ### `.gitignore`
 - Replaced broad `offline` ignore (which hid `offline/motionpipe` + `offline/tools` code) and weak `*datasets`/`/datasets`/`/output` patterns with explicit `offline/datasets/`, `datasets/`, `**/datasets/`, `offline/output/`, `offline/.venv/` and global video/binary/image globs (`*.MOV`/`*.mov`/`*.mp4`/`*.MP4`/`*.avi`/`*.mkv`/`*.webm`/`*.m4v`/`*.jpg`/`*.jpeg`/`*.png`/`*.gif`/`*.bmp`/`*.tiff`/`*.npz`/`*.npy`) to cover the 1.5G `offline/datasets` 107 MOVs + 7.6M `offline/output` generated json/png/vrma + envs. Keeps `public/models/*.vrm` + `public/animations/*.vrma` tracked (data-driven assets). Prevents future `git add` of datasets/videos/envs without untracking existing history. Verified `git check-ignore --no-index` 139 files would be ignored, 190 kept (only `public/models/AvatarSample_C.vrm` 15M remains large & intentional).
-- Why: request to ignore all image/dataset/video/env files not needed on GitHub; previous patterns did not match nested `offline/datasets/**` (verified `git check-ignore --no-index`) and `offline` was over-broad. Added global image globs per follow-up confirmation.
+- Deduplicated trailing ` .venv/` `venv/` `__pycache__/` `*.pyc` block (duplicate of Python section) to keep file canonical 73 lines; `git status --ignored` 21, `git ls-files --others --exclude-standard` 0.
+- Why: request to ignore all image/dataset/video/env files not needed on GitHub; previous patterns did not match nested `offline/datasets/**` (verified `git check-ignore --no-index`) and `offline` was over-broad. Added global image globs per follow-up confirmation. Cleanup verifies `would-be-committed` untracked is 0.
 
 ---
 
