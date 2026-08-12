@@ -1,0 +1,16 @@
+# pipeline/requirements-splx.txt — optional GPU deps for SMPL-X modes
+# Install only if you have local SMPLX assets in pipeline/.models/smplx/ and a CUDA GPU
+# Usage: pip install -r pipeline/requirements-splx.txt
+# All artifacts stay in pipeline/ (.models, .cache, .tmp, outputs) — no auto-download per config
+
+# PyTorch with CUDA 12.1 (adjust for your CUDA)
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch>=2.2
+torchvision>=0.17
+
+# SMPL-X body model (research-only, register at https://smplx.is.tue.mpg.de)
+# Place SMPLX_NEUTRAL.npz/.pkl manually in pipeline/.models/smplx/ — this package only provides the loader
+smplx>=0.1.55
+
+# Optional helpers for SMPLest-X checkpoint (if you vendor it in pipeline/.models/smplx/)
+# smplest @ file:///${PIPELINE}/.models/smplest_x-whl  # placeholder

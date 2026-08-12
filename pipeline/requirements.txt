@@ -1,0 +1,16 @@
+# pipeline/requirements.txt — isolated, does not touch root requirements.txt
+# Install: pip install -r pipeline/requirements.txt
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+pydantic==2.11.7
+python-multipart==0.0.9
+opencv-python>=4.8
+numpy>=1.24
+
+# Optional — uncomment if you want real extraction (else dummy keeps server working):
+mediapipe>=0.10,<0.11
+ultralytics>=8.0
+
+# Note: mediapipe 0.10 legacy wheels are absent on Python 3.13.
+# On 3.13 prefer mediapipe-tasks or run this pipeline on Python 3.11/3.12.
+# The server auto-falls back to dummy sinusoid motion if mediapipe is missing.

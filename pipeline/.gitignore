@@ -1,0 +1,13 @@
+# pipeline — all generated/downloaded stays inside this folder
+outputs/*
+!outputs/.gitignore
+.tmp/*
+!.tmp/.gitkeep
+.cache/*
+!.cache/.gitkeep
+.models/*
+!.models/.gitkeep
+.models/*/*
+!.models/*/.gitkeep
+yolo*.pt
+*.onnx
