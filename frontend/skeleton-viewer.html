@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>skeleton-stream viewer</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        background: #070b12;
+        font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #9fb4d4;
+      }
+      #app { position: fixed; inset: 0; }
+      #hud {
+        position: fixed;
+        left: 14px;
+        top: 14px;
+        background: rgba(10, 16, 26, 0.82);
+        border: 1px solid #1c2a42;
+        border-radius: 8px;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 260px;
+        backdrop-filter: blur(4px);
+      }
+      #hud h1 {
+        margin: 0;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #55e6ff;
+      }
+      #hud dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2px 12px;
+      }
+      #hud dt { color: #5b7194; }
+      #hud dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #hud .controls { display: flex; gap: 8px; align-items: center; }
+      #hud button {
+        background: #10243f;
+        color: #a9e8ff;
+        border: 1px solid #1c3a5c;
+        border-radius: 6px;
+        padding: 5px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+      #hud button:hover { background: #15304f; }
+      #hud input[type='range'] { flex: 1; accent-color: #55e6ff; }
+      #hud select {
+        background: #0a1220;
+        color: #9fb4d4;
+        border: 1px solid #1c2a42;
+        border-radius: 6px;
+        font: inherit;
+      }
+      #hud label { display: flex; gap: 6px; align-items: center; color: #7f97bb; }
+      #hud .hint { color: #41557a; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <h1>skeleton-stream viewer</h1>
+      <dl>
+        <dt>clip</dt><dd id="hud-clip">–</dd>
+        <dt>stream</dt><dd id="hud-stream">–</dd>
+        <dt>meta</dt><dd id="hud-meta">–</dd>
+      </dl>
+      <div class="controls">
+        <button id="btn-play">Pause</button>
+        <button id="btn-restart" title="restart">&#8634;</button>
+        <input id="scrub" type="range" min="0" max="0" value="0" step="1" />
+      </div>
+      <div class="controls">
+        <span id="hud-frame">0 / 0</span>
+        <label>
+          speed
+          <select id="speed">
+            <option value="0.25">0.25&#215;</option>
+            <option value="0.5">0.5&#215;</option>
+            <option value="1" selected>1&#215;</option>
+            <option value="2">2&#215;</option>
+          </select>
+        </label>
+        <label><input id="loop" type="checkbox" checked /> loop</label>
+      </div>
+      <div class="hint">drag orbit &#183; scroll zoom &#183; space play/pause</div>
+    </div>
+    <script type="module" src="/viewer/skeleton-viewer.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,18 @@
+PHASE 3 — 3D GRAPH + INTRA MOTION — STATUS: IMPLEMENTED 2026-08-11
+
+Input: SMPL-X 3D joints from Phase 2 (synthetic validated; real NPZ pending). Uses actual SMPL-X 55 (not paper's 57 Vicon).
+
+1. Module [DONE]: offline/motion_analysis/{__init__.py, topology.py (SMPLX_NAMES 55 + 52 edges), graph.py (SkeletonGraph, SkeletonGraphSequence, MotionFrameResult, from_npz), features.py (pelvis_centered, scale, shoulder_width, vertex/edge motion)}
+G_t=(V_t,E_t) with name/index/x/y/z and edge source/target/vector/length — verified.
+
+2. Topology [DONE]: 52 edges from 55 names (pelvis→spine→neck/head, shoulder→elbow→wrist, 5 finger chains per hand). Extra J>55 labelled ext. Table via topology_table(). No invented joints.
+
+3. Edge [DONE]: e_ij=v_i-v_j, ||e||, raw kept.
+
+4. Normalization [DONE]: raw | pelvis_centered | scale_normalized | shoulder_width (optional, never mutates NPZ).
+
+5. Intra motion [DONE]: m_v=||v_i(t+1)-v_i(t)||, m_e=||e_ij(t+1)-e_ij(t)||, thresholds from max*0.2 (paper_mode, 0.2 is reported tested value), plus percentile_mode/absolute_mode (marked extensions). Eq 8 union documented (paper ambiguous).
+
+6. Temporal order preserved → MotionFrameResult. Tests [DONE synthetic]: edges valid/no dups/hand topology/finite/frame count/round-trip NPZ (10 frames, E=52). Visuals pending real NPZ (motion magnitude/heatmaps).
+
+Output: graph sequence + motion frames; synthetic N=10→10 retained (high random motion), J=55, E=52, FPS 25 — real NPZ will show retention %.

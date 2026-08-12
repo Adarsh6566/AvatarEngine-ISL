@@ -1,0 +1,4 @@
+# Offline pipeline deps. Requires Python 3.11/3.12 (mediapipe Holistic
+# legacy solution is unavailable on 3.13 / mediapipe 1.x).
+mediapipe>=0.10,<0.11
+opencv-python>=4.8

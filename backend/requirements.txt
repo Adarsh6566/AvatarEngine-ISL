@@ -1,0 +1,2 @@
+# Delegates to universal requirements at repo root.
+-r ../requirements.txt

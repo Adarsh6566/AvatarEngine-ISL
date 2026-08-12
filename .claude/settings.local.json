@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(npm i *)",
+      "Bash(python3 *)",
+      "Bash(curl -s -o /dev/null -w \"root: %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s http://localhost:5173/src/main.ts -o /dev/null -w \"main.ts: %{http_code}\\\\n\")",
+      "Bash(curl -s -o /dev/null -w \"vrm: %{http_code}\\\\n\" http://localhost:5173/models/avatar.vrm)",
+      "Bash(curl -s -o /dev/null -w \"hello_sign.vrma: %{http_code}\\\\n\" http://localhost:5173/animations/hello_sign.vrma)",
+      "mcp__blender__get_scene_info"
+    ]
+  }
+}
