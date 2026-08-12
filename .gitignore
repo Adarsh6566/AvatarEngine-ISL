@@ -70,9 +70,3 @@ public/models/*.log
 # Misc
 *.tmp
 *.temp
-
-# Python virtual environments
-.venv/
-venv/
-__pycache__/
-*.pyc
