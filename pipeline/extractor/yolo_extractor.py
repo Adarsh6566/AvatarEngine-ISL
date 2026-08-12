@@ -16,6 +16,9 @@ from .mediapipe_extractor import _dummy_stream
 from .schemas import CANONICAL_JOINTS, JointSpec, SkeletonFrame, SkeletonMeta, SkeletonStreamDict
 
 
+_YOLO_CACHE = None  # global cache to avoid reload per request
+_YOLO_CACHE_PATH = None
+
 class YoloExtractor(Extractor):
     @property
     def name(self) -> str:
@@ -60,9 +63,15 @@ class YoloExtractor(Extractor):
             # use absolute path inside pipeline/ so CWD doesn't matter (repo root vs pipeline/)
             from pathlib import Path as _P
 
+            global _YOLO_CACHE, _YOLO_CACHE_PATH
             _yolo_pt = _P(__file__).parent.parent / "yolo11n-pose.pt"
             model_path = str(_yolo_pt) if _yolo_pt.exists() else "yolo11n-pose.pt"
-            model = YOLO(model_path)  # will auto-download to pipeline/ if missing
+            if _YOLO_CACHE is not None and _YOLO_CACHE_PATH == model_path:
+                model = _YOLO_CACHE
+            else:
+                model = YOLO(model_path)  # will auto-download to pipeline/ if missing
+                _YOLO_CACHE = model
+                _YOLO_CACHE_PATH = model_path
             cap = cv2.VideoCapture(str(video_path))
             fps = cap.get(cv2.CAP_PROP_FPS)
             if not fps or math.isnan(fps) or fps < 1:
@@ -81,7 +90,7 @@ class YoloExtractor(Extractor):
                     kpts = res.keypoints.xy[0].cpu().numpy()  # (17,2)
                     confs = res.keypoints.conf[0].cpu().numpy() if hasattr(res.keypoints, "conf") else [1.0] * 17
                     # COCO 17 map: 0 nose, 5 lShoulder,6 rShoulder,7 lElbow,8 rElbow,9 lWrist,10 rWrist,11 lHip,12 rHip,13 lKnee,14 rKnee,15 lAnkle,16 rAnkle
-                    CONF_THRESH = 0.4
+                    CONF_THRESH = 0.25  # lower for blurry frames
                     def kp(i):
                         conf = float(confs[i] if i < len(confs) else 1.0)
                         if conf < CONF_THRESH:

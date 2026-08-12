@@ -18,8 +18,10 @@ except Exception:  # pragma: no cover
 from .base import Extractor, Space
 from .schemas import CANONICAL_JOINTS, JointSpec, SkeletonFrame, SkeletonMeta, SkeletonStreamDict
 
-CONF_THRESH = 0.4
+CONF_THRESH = 0.25  # lower for blurry frames
 VIS_THRESH = 0.4
+_HYBRID_YOLO_CACHE = None
+_HYBRID_YOLO_CACHE_PATH = None
 
 
 def _load_hand_landmarker():
@@ -88,13 +90,18 @@ class HybridYoloMediapipeExtractor(Extractor):
             # force model path inside pipeline/ (not ~/.ultralytics)
             yolo_pt = Path(__file__).parent.parent / "yolo11n-pose.pt"
             if not yolo_pt.exists():
-                # fallback to ultralytics default cache, but ensure within pipeline on first download
-                # ultralytics will download to cwd/pipeline
                 import os
 
                 os.environ.setdefault("YOLO_CONFIG_DIR", str(Path(__file__).parent.parent / ".cache"))
                 yolo_pt = "yolo11n-pose.pt"  # type: ignore
-            model = YOLO(str(yolo_pt))  # type: ignore
+            global _HYBRID_YOLO_CACHE, _HYBRID_YOLO_CACHE_PATH
+            model_path_str = str(yolo_pt)
+            if _HYBRID_YOLO_CACHE is not None and _HYBRID_YOLO_CACHE_PATH == model_path_str:
+                model = _HYBRID_YOLO_CACHE
+            else:
+                model = YOLO(model_path_str)  # type: ignore
+                _HYBRID_YOLO_CACHE = model
+                _HYBRID_YOLO_CACHE_PATH = model_path_str
             cap = _cv2.VideoCapture(str(video_path))
             fps_cap = cap.get(_cv2.CAP_PROP_FPS)
             if fps_cap and not math.isnan(fps_cap) and fps_cap >= 1:
