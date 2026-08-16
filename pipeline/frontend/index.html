@@ -9,8 +9,9 @@
   <script type="importmap">
     {
       "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        "three": "https://unpkg.com/three@0.167.1/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.167.1/examples/jsm/",
+        "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@3.4.2/lib/three-vrm.module.min.js"
       }
     }
   </script>
@@ -78,6 +79,15 @@
       <div class="controls">
         <button id="playBoth" class="btn small" disabled>▶</button>
         <input id="scrub" type="range" min="0" max="0" value="0" class="scrub" disabled />
+        <label class="sel">speed
+          <select id="speedSel">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
+        <span id="frameCount" class="time">—</span>
         <span id="timeLabel" class="time">—</span>
       </div>
     </div>
@@ -95,6 +105,18 @@
       <div class="controls small">
         <span id="frameLabel" class="muted">—</span>
         <span id="hint3d" class="muted hidden">drag to orbit · wheel to zoom · right-drag to pan</span>
+      </div>
+    </div>
+
+    <div class="pane pane-avatar">
+      <div class="pane-head">
+        Avatar (VRM)
+        <span id="vrmMeta" class="muted small"></span>
+        <span class="spacer"></span>
+        <span class="muted small">drag to orbit · wheel to zoom</span>
+      </div>
+      <div id="vrmHost" class="vrm3d">
+        <div id="vrmEmpty" class="empty">Run pipeline — the signing avatar appears here</div>
       </div>
     </div>
   </main>

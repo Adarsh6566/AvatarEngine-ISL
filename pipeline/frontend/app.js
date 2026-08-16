@@ -9,6 +9,7 @@ const apiBase = "";
 let currentStream = null;
 let rafId = null;
 let abortCtrl = null;
+let vrmInst = null;
 
 function edgesFromJoints(spec){ return spec.filter(j=>j.parent).map(j=>({from:j.parent,to:j.name})); }
 
@@ -96,7 +97,7 @@ async function create3DRenderer(host, stream){
     return null;
   }
   host.style.display="block";
-  const W=host.clientWidth||640, H=host.clientWidth||640;
+  const W=host.clientWidth||640, H=host.clientHeight||host.clientWidth||640;
   const scene=new THREE.Scene(); scene.background=new THREE.Color(0x0b0d12);
   const camera=new THREE.PerspectiveCamera(45,W/H,0.1,100); camera.position.set(0,0.9,2.2);
   const renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setSize(W,H);
@@ -116,7 +117,7 @@ async function create3DRenderer(host, stream){
   controls.target.set(0,0.15,0); controls.enableDamping=true; controls.dampingFactor=0.08;
   controls.minDistance=0.8; controls.maxDistance=5; controls.update();
   window.addEventListener("resize",()=>{
-    const w=host.clientWidth||640, h=host.clientWidth||640;
+    const w=host.clientWidth||640, h=host.clientHeight||host.clientWidth||640;
     camera.aspect=w/h; camera.updateProjectionMatrix(); renderer.setSize(w,h);
   });
   let currentStream=stream, currentEdges=edges;
@@ -167,7 +168,7 @@ async function create3DRenderer(host, stream){
 }
 
 // wiring
-const srcVideo=$("#srcVideo"), noVideo=$("#noVideo"), skel2d=$("#skel2d"), skel3dHost=$("#skel3dHost");
+const srcVideo=$("#srcVideo"), noVideo=$("#noVideo"), skel2d=$("#skel2d"), skel3dHost=$("#skel3dHost"), vrmHost=$("#vrmHost");
 const r2d=create2DRenderer(skel2d);
 const health=$("#health");
 async function checkHealth(){
@@ -285,6 +286,7 @@ function onStreamReady(data){
   dlMp4.href=`${apiBase}${data.outputs.skeletonVideo}`; dlMp4.classList.remove("hidden"); dlMp4.download=data.run_id+"_skeleton.mp4";
   r2d.setStream(data.stream);
   if(skel3dHost._renderer) skel3dHost._renderer.stream=data.stream;
+  if(vrmInst){ vrmInst.setStream(data.stream); $("#vrmMeta").textContent=`${data.frameCount} frames`; }
   $("#playBoth").disabled=false; $("#scrub").disabled=false;
   $("#scrub").max=Math.max(0,data.frameCount-1); $("#scrub").value=0;
   if($("#viewSel").value==="3d") init3DView(data.stream);
@@ -326,11 +328,13 @@ function wireSync(){
     else r2d.drawFrame(idx);
     $("#scrub").value=String(idx);
     $("#frameLabel").textContent=`${idx} / ${currentStream.frames.length}`;
+    $("#frameCount").textContent=`f ${idx} / ${currentStream.frames.length}`;
     $("#timeLabel").textContent=`${t.toFixed(2)}s / ${streamDur.toFixed(2)}s`;
     if(skel3dHost._renderer){
       if(skel3dHost._renderer.setFrameLerp) skel3dHost._renderer.setFrameLerp(idx, alpha);
       else skel3dHost._renderer.setFrame(idx);
     }
+    if(vrmInst) vrmInst.setFrameLerp(idx, alpha);
   }
   // remove old listeners
   srcVideo.removeEventListener("timeupdate", srcVideo._onTime||(()=>{}));
@@ -369,6 +373,7 @@ function wireSync(){
       if(skel3dHost._renderer.setFrameLerp) skel3dHost._renderer.setFrameLerp(idx,0);
       else skel3dHost._renderer.setFrame(idx);
     }
+    if(vrmInst) vrmInst.setFrameLerp(idx,0);
   };
   $("#playBoth").onclick=()=>{
     if(srcVideo.paused) srcVideo.play();
@@ -410,7 +415,169 @@ function bindEvents(){
   $("#viewSel")?.addEventListener("change",updateViewMode);
   $("#playBoth")?.addEventListener("click", ()=>{ /* handled in wireSync, keep for init */ });
   srcVideo?.addEventListener("loadedmetadata",()=>{ $("#timeLabel").textContent=`0.00s / ${srcVideo.duration.toFixed(2)}s`; });
+  $("#speedSel")?.addEventListener("change", e=>{ if(srcVideo) srcVideo.playbackRate = parseFloat(e.target.value)||1; });
   checkHealth(); updateViewMode();
+  // boot the VRM avatar pane (loads the model into rest pose; fed once a stream arrives)
+  createVrmRenderer(vrmHost).then(i=>{ vrmInst=i; if(currentStream&&i) i.setStream(currentStream); }).catch(e=>console.error("[vrm] init failed", e));
 }
 if(document.readyState==="loading") document.addEventListener("DOMContentLoaded", bindEvents);
 else bindEvents();
+
+// ============================================================================
+// VRM avatar renderer — ports frontend/skeleton/VrmRenderer.ts to vanilla JS.
+// Consumes the SAME view-normalised stream the skeleton panes use and retargets
+// joint positions onto the signing VRM via forward-kinematic swing extraction.
+// ============================================================================
+async function createVrmRenderer(host){
+  if(vrmInst) return vrmInst;
+  let THREE, OrbitControls, GLTFLoader, VRMMOD;
+  try{
+    THREE = await import("three");
+    ({OrbitControls} = await import("three/addons/controls/OrbitControls.js"));
+    ({GLTFLoader} = await import("three/addons/loaders/GLTFLoader.js"));
+    VRMMOD = await import("@pixiv/three-vrm");
+  }catch(e){
+    console.error("[vrm] import failed", e);
+    host.innerHTML = '<div class="empty">VRM libs failed to load.<br><small>'+String(e)+'</small></div>';
+    return null;
+  }
+  const { VRMLoaderPlugin, VRMUtils, VRMHumanBoneName:V } = VRMMOD;
+
+  const W = host.clientWidth||640, H = host.clientHeight||host.clientWidth||640;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(35, W/H, 0.1, 100);
+  camera.position.set(0, 1.0, 3.0);
+  const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+  renderer.setSize(W,H); renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  host.querySelector('#vrmEmpty')?.remove();
+  host.appendChild(renderer.domElement);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 2.2));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(1,2,2); scene.add(dl);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0.9, 0); controls.enableDamping=true; controls.dampingFactor=0.08;
+  controls.minDistance=1.2; controls.maxDistance=6; controls.update();
+  new ResizeObserver(()=>{ const w=host.clientWidth||640, h=host.clientHeight||host.clientWidth||640; camera.aspect=w/h; camera.updateProjectionMatrix(); renderer.setSize(w,h); }).observe(host);
+
+  const B = (Side,n)=> V[Side+n];
+  function sideDrives(Side,p){
+    return [
+      {bone:B(Side,'UpperArm'),parent:V.Chest,restChild:B(Side,'LowerArm'),from:p+'Shoulder',to:p+'Elbow'},
+      {bone:B(Side,'LowerArm'),parent:B(Side,'UpperArm'),restChild:B(Side,'Hand'),from:p+'Elbow',to:p+'Wrist'},
+      {bone:B(Side,'Hand'),parent:B(Side,'LowerArm'),restChild:B(Side,'MiddleProximal'),from:p+'Hand',to:p+'Middle1'},
+      {bone:B(Side,'ThumbProximal'),parent:B(Side,'Hand'),restChild:B(Side,'ThumbDistal'),from:p+'Thumb1',to:p+'Thumb2'},
+      {bone:B(Side,'IndexProximal'),parent:B(Side,'Hand'),restChild:B(Side,'IndexIntermediate'),from:p+'Index1',to:p+'Index2'},
+      {bone:B(Side,'IndexIntermediate'),parent:B(Side,'IndexProximal'),restChild:B(Side,'IndexDistal'),from:p+'Index2',to:p+'Index3'},
+      {bone:B(Side,'IndexDistal'),parent:B(Side,'IndexIntermediate'),restChild:B(Side,'IndexDistal'),from:p+'Index3',to:p+'Index4',restFromParent:true},
+      {bone:B(Side,'MiddleProximal'),parent:B(Side,'Hand'),restChild:B(Side,'MiddleIntermediate'),from:p+'Middle1',to:p+'Middle2'},
+      {bone:B(Side,'MiddleIntermediate'),parent:B(Side,'MiddleProximal'),restChild:B(Side,'MiddleDistal'),from:p+'Middle2',to:p+'Middle3'},
+      {bone:B(Side,'MiddleDistal'),parent:B(Side,'MiddleIntermediate'),restChild:B(Side,'MiddleDistal'),from:p+'Middle3',to:p+'Middle4',restFromParent:true},
+      {bone:B(Side,'RingProximal'),parent:B(Side,'Hand'),restChild:B(Side,'RingIntermediate'),from:p+'Ring1',to:p+'Ring2'},
+      {bone:B(Side,'RingIntermediate'),parent:B(Side,'RingProximal'),restChild:B(Side,'RingDistal'),from:p+'Ring2',to:p+'Ring3'},
+      {bone:B(Side,'RingDistal'),parent:B(Side,'RingIntermediate'),restChild:B(Side,'RingDistal'),from:p+'Ring3',to:p+'Ring4',restFromParent:true},
+      {bone:B(Side,'LittleProximal'),parent:B(Side,'Hand'),restChild:B(Side,'LittleIntermediate'),from:p+'Pinky1',to:p+'Pinky2'},
+      {bone:B(Side,'LittleIntermediate'),parent:B(Side,'LittleProximal'),restChild:B(Side,'LittleDistal'),from:p+'Pinky2',to:p+'Pinky3'},
+      {bone:B(Side,'LittleDistal'),parent:B(Side,'LittleIntermediate'),restChild:B(Side,'LittleDistal'),from:p+'Pinky3',to:p+'Pinky4',restFromParent:true},
+      {bone:B(Side,'UpperLeg'),parent:V.Hips,restChild:B(Side,'LowerLeg'),from:p+'Hip',to:p+'Knee'},
+      {bone:B(Side,'LowerLeg'),parent:B(Side,'UpperLeg'),restChild:B(Side,'Foot'),from:p+'Knee',to:p+'Ankle'},
+    ];
+  }
+  const DRIVES = [
+    {bone:V.Spine,parent:V.Hips,restChild:V.Chest,from:'spine',to:'chest'},
+    {bone:V.Chest,parent:V.Spine,restChild:V.Neck,from:'chest',to:'neck'},
+    {bone:V.Neck,parent:V.Chest,restChild:V.Head,from:'neck',to:'head'},
+    ...sideDrives('Left','l'),
+    ...sideDrives('Right','r'),
+  ];
+  const LEG_BONES = new Set([V.LeftUpperLeg,V.LeftLowerLeg,V.RightUpperLeg,V.RightLowerLeg]);
+
+  let vrm=null, pendingJoints=null, streamRef=null;
+  const restDir = new Map();
+  const rootParentWorldQ = new THREE.Quaternion();
+  const _c = new THREE.Vector3();
+
+  function captureRest(v){
+    const node = b=> v.humanoid.getNormalizedBoneNode(b);
+    const wp = b=>{ const n=node(b); if(!n) return null; n.updateWorldMatrix(true,false); return n.getWorldPosition(new THREE.Vector3()); };
+    for(const d of DRIVES){
+      if(d.restFromParent){
+        const self=wp(d.bone), par=wp(d.parent);
+        if(self&&par&&self.distanceToSquared(par)>1e-8) restDir.set(d.bone, self.clone().sub(par).normalize());
+        continue;
+      }
+      const a=wp(d.bone), b=wp(d.restChild);
+      if(a&&b) restDir.set(d.bone, b.clone().sub(a).normalize());
+    }
+    node(V.Hips)?.parent?.getWorldQuaternion(rootParentWorldQ);
+  }
+
+  function applyPose(J){
+    pendingJoints = J;
+    if(!vrm) return;
+    const pos = name=>{ const v=J[name]; return v ? new THREE.Vector3(v[0],v[1],v[2]) : null; };
+    const pose={}, Rworld=new Map(), identity=new THREE.Quaternion();
+    const hips=pos('hips'), chest=pos('chest'), lSh=pos('lShoulder'), rSh=pos('rShoulder');
+    let Rhips=new THREE.Quaternion();
+    if(hips&&chest&&lSh&&rSh){
+      const up=chest.clone().sub(hips).normalize();
+      const lr=rSh.clone().sub(lSh).normalize();
+      const f=new THREE.Vector3().crossVectors(up,lr).normalize();
+      const r=new THREE.Vector3().crossVectors(up,f).normalize();
+      Rhips.setFromRotationMatrix(new THREE.Matrix4().makeBasis(r,up,f));
+    }
+    Rworld.set(V.Hips,Rhips);
+    const hipsLocal=rootParentWorldQ.clone().invert().multiply(Rhips);
+    pose[V.Hips]={rotation:[hipsLocal.x,hipsLocal.y,hipsLocal.z,hipsLocal.w]};
+    for(const d of DRIVES){
+      const Rparent=Rworld.get(d.parent)??identity;
+      if(LEG_BONES.has(d.bone)){ Rworld.set(d.bone,Rparent); continue; }   // legs locked (bad depth)
+      const rest=restDir.get(d.bone);
+      const a=pos(d.from), b=pos(d.to);
+      if(!rest||!a||!b){ Rworld.set(d.bone,Rparent); continue; }
+      _c.copy(b).sub(a);
+      if(_c.lengthSq()<1e-8){ Rworld.set(d.bone,Rparent); continue; }
+      const obsLocal=_c.clone().applyQuaternion(Rparent.clone().invert()).normalize();
+      const qLocal=new THREE.Quaternion().setFromUnitVectors(rest,obsLocal);
+      pose[d.bone]={rotation:[qLocal.x,qLocal.y,qLocal.z,qLocal.w]};
+      Rworld.set(d.bone,Rparent.clone().multiply(qLocal));
+    }
+    vrm.humanoid.setNormalizedPose(pose);
+    vrm.humanoid.update();
+  }
+
+  const loader = new GLTFLoader();
+  loader.register(p=> new VRMLoaderPlugin(p));
+  loader.load('/models/AvatarSample_C.vrm', (gltf)=>{
+    vrm = gltf.userData.vrm;
+    try{ VRMUtils.removeUnnecessaryVertices(vrm.scene); }catch{}
+    try{ VRMUtils.combineSkeletons(vrm.scene); }catch{}
+    VRMUtils.rotateVRM0(vrm);
+    scene.add(vrm.scene);
+    captureRest(vrm);
+    if(pendingJoints) applyPose(pendingJoints);
+  }, undefined, (e)=>{ console.error('[vrm] load failed', e); host.innerHTML='<div class="empty">VRM load failed<br><small>'+String(e)+'</small></div>'; });
+
+  function frameJoints(idx,alpha){
+    if(!streamRef) return null;
+    const fr=streamRef.frames, n=fr.length; if(!n) return null;
+    const f0=fr[Math.max(0,Math.min(idx,n-1))], f1=fr[Math.max(0,Math.min(idx+1,n-1))];
+    if(!f0) return null;
+    if(!(alpha>0)||!f1) return f0.joints;
+    const out={};
+    for(const spec of streamRef.meta.joints){
+      const a=f0.joints[spec.name], b=f1.joints[spec.name];
+      if(!a&&!b) continue;
+      if(!a||!b){ out[spec.name]=a||b; continue; }
+      out[spec.name]=[a[0]*(1-alpha)+b[0]*alpha, a[1]*(1-alpha)+b[1]*alpha, a[2]*(1-alpha)+b[2]*alpha, Math.max(a[3],b[3])];
+    }
+    return out;
+  }
+  function setStream(s){ streamRef=s; setFrameLerp(0,0); }
+  function setFrame(idx){ const j=frameJoints(idx,0); if(j) applyPose(j); }
+  function setFrameLerp(idx,alpha){ const j=frameJoints(idx,alpha); if(j) applyPose(j); }
+
+  (function loop(){ requestAnimationFrame(loop); controls.update(); if(vrm) vrm.update(1/60); renderer.render(scene,camera); })();
+
+  vrmInst = { setStream, setFrame, setFrameLerp, get stream(){return streamRef}, set stream(s){ setStream(s); } };
+  return vrmInst;
+}
