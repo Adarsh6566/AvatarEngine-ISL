@@ -2,7 +2,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RenderEngine } from '../core/RenderEngine';
 import { loadSkeletonStream } from '../skeleton/SkeletonStream';
 import { NeonLineRenderer } from '../skeleton/NeonLineRenderer';
-import { SkeletonPlayer } from '../skeleton/SkeletonRenderer';
+import { VrmRenderer } from '../skeleton/VrmRenderer';
+import { SkeletonPlayer, type SkeletonRenderer } from '../skeleton/SkeletonRenderer';
 
 /**
  * Composition root for the standalone skeleton-stream viewer
@@ -23,20 +24,30 @@ function el<T extends HTMLElement>(id: string): T {
 const container = document.querySelector<HTMLDivElement>('#app');
 if (!container) throw new Error('Mount element #app not found');
 
-const src = new URLSearchParams(window.location.search).get('src') ?? '/skeleton/hello.json';
+const params = new URLSearchParams(window.location.search);
+const src = params.get('src') ?? '/skeleton/hello.json';
+const useVrm = params.get('renderer') === 'vrm';
+
+// VRM avatars are ~1.6 m tall (hips ≈ 0.9 m); the neon armature is unit-scaled.
+// Frame the camera to whichever is showing. The X offset pans the view left so
+// the avatar sits on the RIGHT half of the canvas, clear of the top-left HUD box.
+const camTarget: [number, number, number] = useVrm ? [-1.0, 0.9, 0] : [0, 0.5, 0];
+const camPos: [number, number, number] = useVrm ? [-1.0, 1.0, 3.0] : [0, 0.8, 2.6];
 
 const engine = new RenderEngine({
   container,
   background: 0x070b12,
-  camera: { fov: 35, position: [0, 0.8, 2.6], target: [0, 0.5, 0] },
+  camera: { fov: 35, position: camPos, target: camTarget },
 });
 
 const controls = new OrbitControls(engine.camera, engine.domElement);
-controls.target.set(0, 0.5, 0);
+controls.target.set(...camTarget);
 controls.enableDamping = true;
 engine.onUpdate(() => controls.update());
 
-const renderer = new NeonLineRenderer();
+const renderer: SkeletonRenderer = useVrm
+  ? new VrmRenderer('/models/AvatarSample_C.vrm')
+  : new NeonLineRenderer();
 renderer.attach(engine);
 const player = new SkeletonPlayer(renderer);
 
@@ -108,6 +119,10 @@ async function boot(): Promise<void> {
   hudFrame.textContent = `0 / ${stream.frameCount}`;
   syncPlayUi();
 }
+
+// Kick off the render/update loop — without this frame() never runs, so the
+// scene never draws and the player never advances (blank canvas, frozen frame 0).
+engine.start();
 
 boot().catch((error) => {
   console.error('[skeleton-viewer]', error);

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>pipeline — video → skeleton</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.167.1/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.167.1/examples/jsm/",
+        "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@3.4.2/lib/three-vrm.module.min.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <strong>pipeline</strong>
+      <span class="muted">video → skeleton 2.5D</span>
+      <span id="health" class="health" title="backend health"></span>
+    </div>
+    <div class="top-actions">
+      <label class="sel">extractor
+        <select id="extractorSel">
+          <optgroup label="CPU — no GPU">
+            <option value="mediapipe">mediapipe (hands 2.5D)</option>
+            <option value="yolo">yolo (body only)</option>
+            <option value="hybrid_yolo_mediapipe">hybrid: yolo body + mediapipe hands ★</option>
+          </optgroup>
+          <optgroup label="GPU — needs SMPLX in pipeline/.models/smplx/">
+            <option value="hybrid_smplx_mediapipe">hybrid: smplx body + mediapipe hands</option>
+            <option value="smplx_full">smplx full (body+mano)</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="sel">space
+        <select id="spaceSel">
+          <option value="world">world</option>
+          <option value="image">image</option>
+        </select>
+      </label>
+      <label class="sel">view
+        <select id="viewSel">
+          <option value="2d">2D</option>
+          <option value="3d">3D</option>
+        </select>
+      </label>
+    </div>
+  </header>
+
+  <section class="dropzone" id="dropzone">
+    <input id="fileInput" type="file" accept="video/*" multiple style="position:absolute;left:-9999px;opacity:0;width:1px;height:1px;" />
+    <div class="dz-main">
+      <div class="dz-title">Drop video here or</div>
+      <div class="dz-actions">
+        <button id="browseBtn" class="btn" type="button">Choose files</button>
+        <button id="runBtn" class="btn primary" type="button" disabled>▶ Run</button>
+        <button id="stopBtn" class="btn danger hidden" type="button">■ Stop</button>
+      </div>
+      <div id="selectedInfo" class="selectedInfo"></div>
+    </div>
+    <div id="progress" class="progress hidden"><div class="bar" id="progressBar"></div></div>
+    <div id="status" class="status"></div>
+    <div id="estimatorWarn" class="warn hidden"></div>
+  </section>
+
+  <main class="stage">
+    <div class="pane">
+      <div class="pane-head">Source</div>
+      <div class="video-wrap">
+        <video id="srcVideo" controls playsinline></video>
+        <div id="noVideo" class="empty">No video — choose a file and hit Run</div>
+      </div>
+      <div class="controls">
+        <button id="playBoth" class="btn small" disabled>▶</button>
+        <input id="scrub" type="range" min="0" max="0" value="0" class="scrub" disabled />
+        <label class="sel">speed
+          <select id="speedSel">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+          </select>
+        </label>
+        <span id="frameCount" class="time">—</span>
+        <span id="timeLabel" class="time">—</span>
+      </div>
+    </div>
+
+    <div class="pane">
+      <div class="pane-head">
+        Skeleton
+        <span id="skeletonMeta" class="muted small"></span>
+        <span class="spacer"></span>
+        <a id="dlJson" class="link hidden" href="#" download>JSON</a>
+        <a id="dlMp4" class="link hidden" href="#" download>MP4</a>
+      </div>
+      <canvas id="skel2d" width="640" height="640" class="skel-canvas"></canvas>
+      <div id="skel3dHost" class="skel3d hidden"></div>
+      <div class="controls small">
+        <span id="frameLabel" class="muted">—</span>
+        <span id="hint3d" class="muted hidden">drag to orbit · wheel to zoom · right-drag to pan</span>
+      </div>
+    </div>
+
+    <div class="pane pane-avatar">
+      <div class="pane-head">
+        Avatar (VRM)
+        <span id="vrmMeta" class="muted small"></span>
+        <span class="spacer"></span>
+        <span class="muted small">drag to orbit · wheel to zoom</span>
+      </div>
+      <div id="vrmHost" class="vrm3d">
+        <div id="vrmEmpty" class="empty">Run pipeline — the signing avatar appears here</div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
