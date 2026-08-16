@@ -210,7 +210,7 @@ class HybridYoloMediapipeExtractor(Extractor):
                                     p = lm_list[i]
                                     return (float(p.x) * w, float(p.y) * h, float(p.z) * w, 1.0)
                                 joints[f"{side}Hand"] = hp(0)
-                                for k2, ii in [("Thumb1", 2), ("Thumb2", 4), ("Index1", 5), ("Index2", 8), ("Middle1", 9), ("Middle2", 12), ("Ring1", 13), ("Ring2", 16), ("Pinky1", 17), ("Pinky2", 20)]:
+                                for k2, ii in [("Thumb1", 2), ("Thumb2", 3), ("Thumb3", 4), ("Index1", 5), ("Index2", 6), ("Index3", 7), ("Index4", 8), ("Middle1", 9), ("Middle2", 10), ("Middle3", 11), ("Middle4", 12), ("Ring1", 13), ("Ring2", 14), ("Ring3", 15), ("Ring4", 16), ("Pinky1", 17), ("Pinky2", 18), ("Pinky3", 19), ("Pinky4", 20)]:
                                     joints[f"{side}{k2}"] = hp(ii)
                             if len(detected)==2:
                                 # log if tracker corrected vs naive
