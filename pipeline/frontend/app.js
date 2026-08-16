@@ -490,6 +490,10 @@ async function createVrmRenderer(host){
     ...sideDrives('Right','r'),
   ];
   const LEG_BONES = new Set([V.LeftUpperLeg,V.LeftLowerLeg,V.RightUpperLeg,V.RightLowerLeg]);
+  // Sign-language avatar: only arms/hands/fingers are driven. Legs + torso + head
+  // stay upright/still (their MediaPipe depth is noisy and they carry no meaning).
+  // The body still ORIENTS via the hips. All joints are still captured in the JSON.
+  const TORSO_BONES = new Set([V.Spine,V.Chest,V.Neck]);
 
   let vrm=null, pendingJoints=null, streamRef=null;
   const restDir = new Map();
@@ -516,21 +520,15 @@ async function createVrmRenderer(host){
     if(!vrm) return;
     const pos = name=>{ const v=J[name]; return v ? new THREE.Vector3(v[0],v[1],v[2]) : null; };
     const pose={}, Rworld=new Map(), identity=new THREE.Quaternion();
-    const hips=pos('hips'), chest=pos('chest'), lSh=pos('lShoulder'), rSh=pos('rShoulder');
-    let Rhips=new THREE.Quaternion();
-    if(hips&&chest&&lSh&&rSh){
-      const up=chest.clone().sub(hips).normalize();
-      const lr=rSh.clone().sub(lSh).normalize();
-      const f=new THREE.Vector3().crossVectors(up,lr).normalize();
-      const r=new THREE.Vector3().crossVectors(up,f).normalize();
-      Rhips.setFromRotationMatrix(new THREE.Matrix4().makeBasis(r,up,f));
-    }
+    // Root kept UPRIGHT (identity) so the signing avatar stands vertical and faces
+    // the viewer — we don't tilt the whole body with the noisy torso capture.
+    const Rhips=new THREE.Quaternion();
     Rworld.set(V.Hips,Rhips);
     const hipsLocal=rootParentWorldQ.clone().invert().multiply(Rhips);
     pose[V.Hips]={rotation:[hipsLocal.x,hipsLocal.y,hipsLocal.z,hipsLocal.w]};
     for(const d of DRIVES){
       const Rparent=Rworld.get(d.parent)??identity;
-      if(LEG_BONES.has(d.bone)){ Rworld.set(d.bone,Rparent); continue; }   // legs locked (bad depth)
+      if(LEG_BONES.has(d.bone)||TORSO_BONES.has(d.bone)){ Rworld.set(d.bone,Rparent); continue; } // legs+torso+head locked (upright, still)
       const rest=restDir.get(d.bone);
       const a=pos(d.from), b=pos(d.to);
       if(!rest||!a||!b){ Rworld.set(d.bone,Rparent); continue; }
