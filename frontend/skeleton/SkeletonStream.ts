@@ -103,7 +103,16 @@ export function parseSkeletonStream(raw: unknown): SkeletonStream {
 
   return {
     schema: meta.schema,
-    space: typeof meta.coordinate_space === 'string' ? meta.coordinate_space : 'unknown',
+    // Current space of the DATA. Prefer meta.space (set by producers that already
+    // normalized, e.g. pipeline "→ view" output) over meta.coordinate_space, which
+    // is the ORIGINAL-source provenance — using the latter re-flips already-view
+    // data (head below hips). Fall back to coordinate_space for raw streams.
+    space:
+      typeof meta.space === 'string'
+        ? meta.space
+        : typeof meta.coordinate_space === 'string'
+          ? meta.coordinate_space
+          : 'unknown',
     fps,
     frameCount: frames.length,
     duration: typeof meta.duration === 'number' ? meta.duration : frames.length / fps,

@@ -67,6 +67,24 @@ offline/.venv/
 # keep public assets (.vrma/.vrm) - do NOT ignore
 public/models/*.log
 
+# Model weights — downloaded on first run / regenerable, never source.
+# (YOLO .pt auto-downloads via ultralytics; MediaPipe .task into pipeline/.models;
+#  SMPL-X .pkl placed manually. None belong in the repo.)
+*.pt
+*.pth
+*.task
+*.tflite
+*.onnx
+*.pkl
+*.ckpt
+*.safetensors
+
+# Processed capture outputs — regenerated on every pipeline Run.
+pipeline/outputs/*
+!pipeline/outputs/.gitignore
+pipeline/.models/*
+!pipeline/.models/.gitkeep
+
 # Misc
 *.tmp
 *.temp
