@@ -17,8 +17,9 @@ PRESETS: Dict[str, Tuple[float, float]] = {}
 STABLE = ["hips", "spine", "chest", "neck", "head", "lHip", "rHip", "lKnee", "rKnee", "lAnkle", "rAnkle", "lFoot", "rFoot"]
 SEMI = ["lShoulder", "rShoulder"]
 MOBILE = ["lElbow", "rElbow", "lWrist", "rWrist"]
-FINE = ["lHand", "rHand", "lThumb1", "lThumb2", "lIndex1", "lIndex2", "lMiddle1", "lMiddle2", "lRing1", "lRing2", "lPinky1", "lPinky2",
-        "rThumb1", "rThumb2", "rIndex1", "rIndex2", "rMiddle1", "rMiddle2", "rRing1", "rRing2", "rPinky1", "rPinky2"]
+FINE = ["lHand", "rHand",
+        "lThumb1", "lThumb2", "lThumb3", "lIndex1", "lIndex2", "lIndex3", "lIndex4", "lMiddle1", "lMiddle2", "lMiddle3", "lMiddle4", "lRing1", "lRing2", "lRing3", "lRing4", "lPinky1", "lPinky2", "lPinky3", "lPinky4",
+        "rThumb1", "rThumb2", "rThumb3", "rIndex1", "rIndex2", "rIndex3", "rIndex4", "rMiddle1", "rMiddle2", "rMiddle3", "rMiddle4", "rRing1", "rRing2", "rRing3", "rRing4", "rPinky1", "rPinky2", "rPinky3", "rPinky4"]
 
 for j in STABLE:
     PRESETS[j] = (0.22, 0.004)  # heavy EMA, tiny deadzone — no hold-then-snap
@@ -27,7 +28,8 @@ for j in SEMI:
 for j in MOBILE:
     PRESETS[j] = (0.55, 0.004)
 for j in FINE:
-    PRESETS[j] = (0.85, 0.002)  # almost raw
+    PRESETS[j] = (0.45, 0.006)  # fingers: real depth is noisy; smooth so all 3
+    #                             driven bones don't jitter (was 0.85 ≈ raw)
 
 # abrupt change thresholds — if delta > this, treat as blurry-frame jump and smooth more heavily
 ABRUPT_THRESH: Dict[str, float] = {}
