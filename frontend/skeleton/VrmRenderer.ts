@@ -115,11 +115,19 @@ export class VrmRenderer implements SkeletonRenderer {
       sy: sign('sy'),
       sz: sign('sz'),
       swap: q.get('swap') ?? '',
-      rootIdentity: q.get('root') === 'id' || q.get('root') === 'identity',
+      // Root upright by DEFAULT: a sign-language avatar stands vertical and faces
+      // the viewer. Deriving the hip frame from the (noisy) torso lets the whole
+      // body tilt/lean, which we don't want. Pass ?root=torso to follow the torso.
+      rootIdentity: q.get('root') !== 'torso',
       // Legs off by default: MediaPipe lower-body DEPTH is unreliable (ankles get
       // shoved ~0.5 behind the hips), so driving them bends the shins backward.
       // A signing avatar just stands; enable with ?legs=1 if the capture is clean.
       driveLegs: q.get('legs') === '1',
+      // Torso + head off by default too: this is a SIGN-LANGUAGE avatar — only the
+      // arms, hands and fingers carry meaning, and spine/neck depth is noisy. The
+      // whole body still ORIENTS via the hips (Rhips); it just doesn't bend/twist.
+      // Enable full torso+head with ?body=1. (Capture keeps all joints regardless.)
+      driveBody: q.get('body') === '1',
       // Finger driving mode: 'full' (proximal+intermediate), 'prox' (proximal
       // only — the intermediate bone left at rest), 'off' (fingers at rest).
       fingerMode: (q.get('fingers') ?? 'full') as 'full' | 'prox' | 'off',
@@ -129,6 +137,11 @@ export class VrmRenderer implements SkeletonRenderer {
   /** Lower-body bones skipped unless ?legs=1 (see axis.driveLegs). */
   private static readonly LEG_BONES: ReadonlySet<VRMHumanBoneName> = new Set([
     V.LeftUpperLeg, V.LeftLowerLeg, V.RightUpperLeg, V.RightLowerLeg,
+  ]);
+
+  /** Torso + head bones skipped unless ?body=1 — kept upright/still for signing. */
+  private static readonly TORSO_BONES: ReadonlySet<VRMHumanBoneName> = new Set([
+    V.Spine, V.Chest, V.Neck,
   ]);
 
   /** Non-proximal finger bones (intermediate + distal), skipped when ?fingers=prox
@@ -252,8 +265,11 @@ export class VrmRenderer implements SkeletonRenderer {
 
     for (const d of DRIVES) {
       const Rparent = Rworld.get(d.parent) ?? identity;
-      if (!this.axis.driveLegs && VrmRenderer.LEG_BONES.has(d.bone)) {
-        Rworld.set(d.bone, Rparent); // leg left at rest (standing)
+      if (
+        (!this.axis.driveLegs && VrmRenderer.LEG_BONES.has(d.bone)) ||
+        (!this.axis.driveBody && VrmRenderer.TORSO_BONES.has(d.bone))
+      ) {
+        Rworld.set(d.bone, Rparent); // leg/torso left at rest (upright, still)
         continue;
       }
       const fm = this.axis.fingerMode;
