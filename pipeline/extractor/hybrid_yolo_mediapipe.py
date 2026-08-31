@@ -16,6 +16,7 @@ except Exception:  # pragma: no cover
     cv2 = None  # type: ignore
 
 from .base import Extractor, Space
+from .device import select_device
 from .schemas import CANONICAL_JOINTS, JointSpec, SkeletonFrame, SkeletonMeta, SkeletonStreamDict
 
 try:
@@ -107,6 +108,13 @@ class HybridYoloMediapipeExtractor(Extractor):
                 model = YOLO(model_path_str)  # type: ignore
                 _HYBRID_YOLO_CACHE = model
                 _HYBRID_YOLO_CACHE_PATH = model_path_str
+            # Move the (possibly cached) model onto the inference device once,
+            # so the per-frame call below does not re-upload weights.
+            device = select_device()
+            try:
+                model.to(device)  # type: ignore
+            except Exception:
+                device = "cpu"
             cap = _cv2.VideoCapture(str(video_path))
             fps_cap = cap.get(_cv2.CAP_PROP_FPS)
             if fps_cap and not math.isnan(fps_cap) and fps_cap >= 1:
@@ -126,7 +134,7 @@ class HybridYoloMediapipeExtractor(Extractor):
                 if not ok:
                     break
                 h, w = frame.shape[:2]
-                res = model(frame, verbose=False)[0]
+                res = model(frame, verbose=False, device=device)[0]
                 joints = {j.name: None for j in CANONICAL_JOINTS}
                 if res.keypoints is not None and len(res.keypoints) > 0:
                     kpts = res.keypoints.xy[0].cpu().numpy()  # type: ignore
