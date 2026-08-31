@@ -3,10 +3,14 @@
 # Usage: pip install -r pipeline/requirements-splx.txt
 # All artifacts stay in pipeline/ (.models, .cache, .tmp, outputs) — no auto-download per config
 
-# PyTorch with CUDA 12.1 (adjust for your CUDA)
---extra-index-url https://download.pytorch.org/whl/cu121
-torch>=2.2
-torchvision>=0.17
+# PyTorch with CUDA — pick the channel matching your driver's CUDA version
+# (top-right of `nvidia-smi`). cu121 wheels do NOT run on Blackwell cards
+# (RTX 50-series, sm_120): they predate that arch and fail at kernel launch
+# with "no kernel image is available for execution on the device".
+# Blackwell needs cu128 or newer; cu132 matches a CUDA 13.2 driver.
+--extra-index-url https://download.pytorch.org/whl/cu132
+torch>=2.7
+torchvision>=0.22
 
 # SMPL-X body model (research-only, register at https://smplx.is.tue.mpg.de)
 # Place SMPLX_NEUTRAL.npz/.pkl manually in pipeline/.models/smplx/ — this package only provides the loader

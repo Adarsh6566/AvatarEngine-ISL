@@ -85,6 +85,11 @@ export default defineConfig({
         target: `http://${BACKEND_HOST}:${BACKEND_PORT}`,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
+        // The source modules in frontend/api/ share this prefix, so requests for
+        // them (/api/translate.ts) would otherwise be rewritten to /translate.ts
+        // and 404 at the backend. Anything carrying a script extension is a
+        // module request Vite must serve itself; real calls have no extension.
+        bypass: (req) => (req.url && /\.[cm]?[jt]sx?($|\?)/.test(req.url) ? req.url : undefined),
       },
     },
   },

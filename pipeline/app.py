@@ -105,6 +105,16 @@ def health():
         smplx_ok, smplx_detail = check_smplx_available()
     except Exception:
         smplx_ok, smplx_detail = False, "check failed"
+    # device the YOLO-backed extractors will actually run on
+    try:
+        try:
+            from .extractor.device import device_label  # type: ignore
+        except ImportError:
+            from extractor.device import device_label  # type: ignore
+
+        device = device_label()
+    except Exception:
+        device = "unknown"
     return {
         "status": "ok",
         "extractors": list(EXTRACTORS.keys()),
@@ -112,6 +122,7 @@ def health():
         "tmp_dir": str(TMP_DIR.resolve()),
         "cuda": cuda,
         "torch": torch_v,
+        "device": device,
         "smplx_available": smplx_ok,
         "smplx_detail": smplx_detail,
     }

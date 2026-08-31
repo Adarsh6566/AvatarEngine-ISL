@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List
 
 from .base import Extractor, Space
+from .device import select_device
 from .mediapipe_extractor import _dummy_stream
 from .schemas import CANONICAL_JOINTS, JointSpec, SkeletonFrame, SkeletonMeta, SkeletonStreamDict
 
@@ -77,6 +78,13 @@ class YoloExtractor(Extractor):
                 model = YOLO(model_path)  # will auto-download to pipeline/ if missing
                 _YOLO_CACHE = model
                 _YOLO_CACHE_PATH = model_path
+            # Move the (possibly cached) model onto the inference device once,
+            # so the per-frame call below does not re-upload weights.
+            device = select_device()
+            try:
+                model.to(device)
+            except Exception:
+                device = "cpu"
             cap = cv2.VideoCapture(str(video_path))
             fps = cap.get(cv2.CAP_PROP_FPS)
             if not fps or math.isnan(fps) or fps < 1:
@@ -90,7 +98,7 @@ class YoloExtractor(Extractor):
                 if not ok:
                     break
                 h, w = frame.shape[:2]
-                res = model(frame, verbose=False)[0]
+                res = model(frame, verbose=False, device=device)[0]
                 joints = {j.name: None for j in CANONICAL_JOINTS}
                 if res.keypoints is not None and len(res.keypoints) > 0:
                     # take largest person (first)
