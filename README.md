@@ -115,9 +115,9 @@ Drag to orbit, scroll to zoom.
 ## Other commands
 
 ```bash
-npm --prefix frontend run dev        # Vite dev (no type-check)
-npx tsc --noEmit                     # type-check — reads frontend/tsconfig.json
-npm --prefix frontend run build      # tsc && vite build (emits dist/)
+npm --prefix frontend run dev        
+npx tsc --noEmit                     
+npm --prefix frontend run build      
 npm --prefix frontend run preview    # serve dist
 ```
 
