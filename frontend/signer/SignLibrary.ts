@@ -21,7 +21,11 @@ export const SIGN_LIBRARY: readonly SignEntry[] = [
   { gloss: 'ALRIGHT',        path: '/skeleton/alright.json',        words: ['alright', 'okay', 'ok'] },
   { gloss: 'GOOD_MORNING',   path: '/skeleton/good_morning.json',   words: ['good morning', 'morning'] },
   { gloss: 'GOOD_AFTERNOON', path: '/skeleton/good_afternoon.json', words: ['good afternoon', 'afternoon'] },
+  { gloss: 'GOOD_EVENING',   path: '/skeleton/good_evening.json',   words: ['good evening', 'evening'] },
+  { gloss: 'GOOD_NIGHT',     path: '/skeleton/good_night.json',     words: ['good night', 'night', 'goodnight'] },
   { gloss: 'HOW_ARE_YOU',    path: '/skeleton/how_are_you.json',    words: ['how are you', 'how are u', 'howdy'] },
+  { gloss: 'THANK_YOU',      path: '/skeleton/thank_you.json',      words: ['thank you', 'thanks', 'thankyou', 'thank u'] },
+  { gloss: 'PLEASED',        path: '/skeleton/pleased.json',        words: ['pleased', 'nice to meet you', 'glad'] },
 ];
 
 /** One recognised sign in a sentence, with the text that selected it. */
