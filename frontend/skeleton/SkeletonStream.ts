@@ -75,6 +75,70 @@ function fail(reason: string): never {
 
 /** Validate the raw source_skeleton.v1 JSON and map it to a SkeletonStream.
  *  Positions are passed through verbatim in their original coordinate space. */
+/**
+ * Joint-name dialects.
+ *
+ * Two producers write `source_skeleton.v1` with DIFFERENT joint names, and only
+ * the five torso joints (hips/spine/chest/neck/head) overlap:
+ *
+ *   pipeline/  (live extractor)  lShoulder, lElbow, lWrist, lHand, lIndex1..4, lThumb1..3
+ *   offline/   (batch pipeline)  leftShoulder, leftElbow, leftWrist, leftHandWrist,
+ *                                leftIndexMCP/PIP/DIP/TIP, leftThumbCMC/MCP/IP/TIP
+ *
+ * Renderers drive bones by the pipeline names, so an offline-dialect stream left
+ * every driven bone unresolved and the avatar rendered a permanent T-pose. This
+ * map translates the offline dialect to the pipeline one at parse time, which is
+ * the single place skeleton JSON is read — so every consumer gets it for free.
+ *
+ * Finger indices follow the MediaPipe landmark order both producers derive from:
+ * MCP→1, PIP→2, DIP→3, TIP→4. The thumb has one fewer driven joint downstream,
+ * so offline's CMC is dropped and MCP/IP/TIP become Thumb1/2/3.
+ */
+function buildJointAliases(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [long, short] of [['left', 'l'], ['right', 'r']] as const) {
+    out[`${long}Shoulder`] = `${short}Shoulder`;
+    out[`${long}Elbow`] = `${short}Elbow`;
+    out[`${long}Wrist`] = `${short}Wrist`;
+    out[`${long}HandWrist`] = `${short}Hand`;
+    out[`${long}Hip`] = `${short}Hip`;
+    out[`${long}Knee`] = `${short}Knee`;
+    out[`${long}Ankle`] = `${short}Ankle`;
+    out[`${long}ThumbMCP`] = `${short}Thumb1`;
+    out[`${long}ThumbIP`] = `${short}Thumb2`;
+    out[`${long}ThumbTIP`] = `${short}Thumb3`;
+    for (const finger of ['Index', 'Middle', 'Ring', 'Pinky']) {
+      out[`${long}${finger}MCP`] = `${short}${finger}1`;
+      out[`${long}${finger}PIP`] = `${short}${finger}2`;
+      out[`${long}${finger}DIP`] = `${short}${finger}3`;
+      out[`${long}${finger}TIP`] = `${short}${finger}4`;
+    }
+  }
+  return out;
+}
+
+const JOINT_ALIASES: Readonly<Record<string, string>> = buildJointAliases();
+
+/** Canonical (pipeline-dialect) name for a joint. Unknown names pass through. */
+export function canonicalJointName(name: string): string {
+  return JOINT_ALIASES[name] ?? name;
+}
+
+/** Rewrite one frame's joint keys into the canonical dialect. Returns the input
+ *  untouched when nothing needed renaming, so pipeline streams pay no cost. */
+function aliasJoints(
+  joints: Readonly<Record<string, SkeletonJointValue>>,
+): Readonly<Record<string, SkeletonJointValue>> {
+  let renamed = false;
+  const out: Record<string, SkeletonJointValue> = {};
+  for (const [key, value] of Object.entries(joints)) {
+    const canonical = canonicalJointName(key);
+    if (canonical !== key) renamed = true;
+    out[canonical] = value;
+  }
+  return renamed ? out : joints;
+}
+
 export function parseSkeletonStream(raw: unknown): SkeletonStream {
   if (!isObject(raw) || !isObject(raw.meta) || !Array.isArray(raw.frames)) {
     fail('expected { meta, frames }');
@@ -88,7 +152,10 @@ export function parseSkeletonStream(raw: unknown): SkeletonStream {
 
   const joints: SkeletonJointSpec[] = meta.joints.map((j) => {
     if (!isObject(j) || typeof j.name !== 'string') fail('each meta.joints entry needs a name');
-    return { name: j.name, parent: typeof j.parent === 'string' ? j.parent : null };
+    return {
+      name: canonicalJointName(j.name),
+      parent: typeof j.parent === 'string' ? canonicalJointName(j.parent) : null,
+    };
   });
 
   const fps = meta.fps;
@@ -97,7 +164,7 @@ export function parseSkeletonStream(raw: unknown): SkeletonStream {
     return {
       index: typeof f.index === 'number' ? f.index : i,
       timestamp: typeof f.timestamp === 'number' ? f.timestamp : i / fps,
-      joints: f.joints as Readonly<Record<string, SkeletonJointValue>>,
+      joints: aliasJoints(f.joints as Readonly<Record<string, SkeletonJointValue>>),
     };
   });
 
