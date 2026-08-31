@@ -85,6 +85,9 @@ export default defineConfig({
         target: `http://${BACKEND_HOST}:${BACKEND_PORT}`,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
+        // Don't proxy the frontend's own module under api/ (e.g. /api/translate.ts)
+        // — let Vite serve it as source.
+        bypass: (req) => (/\.(ts|js|mjs)(\?|$)/.test(req.url ?? '') ? req.url : undefined),
       },
     },
   },
@@ -96,6 +99,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         'skeleton-viewer': 'skeleton-viewer.html',
+        signer: 'signer.html',
       },
       output: {
         manualChunks(id) {

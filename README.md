@@ -175,3 +175,226 @@ npm --prefix frontend run preview    # serve dist
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Single-source manifest decision |
 | [`AGENTS.md`](AGENTS.md) | Architecture and agent rules |
 | [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Every file modification |
+
+---
+
+# Running the pipelines
+
+There are three apps. **Read this table first — it is the thing people get wrong.**
+
+| | URL | Needs backend? | Needs Vite? |
+|---|---|---|---|
+| **Pipeline 1** — `.vrma` signing | `http://localhost:5173/` | **YES** (`:8000`) | yes (`:5173`) |
+| **New pipeline** — captured motion | `http://localhost:5173/signer.html` | **no** | yes (`:5173`) |
+| **Pipeline 2** — video → skeleton | `http://localhost:8001/` | is its own server | no |
+
+> **The most common failure:** you start only Vite, open `localhost:5173/`, and
+> pipeline 1 loads but nothing signs. The page is served by Vite, but every
+> translation goes to the backend on `:8000`. No backend, no signing. The new
+> pipeline has no backend at all, so it keeps working — which makes it look like
+> "only the signer runs."
+>
+> Check with: `curl -s http://127.0.0.1:8000/health` → expect `{"status":"ok"}`.
+
+## One-time setup
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r pipeline/requirements.txt
+npm --prefix frontend install
+```
+
+---
+
+## Pipeline 1 — text → `.vrma` signing
+
+Needs **two** servers. This one command starts both as a single process group
+(Ctrl+C stops both):
+
+```bash
+npm run dev:all
+```
+
+Open **http://localhost:5173/**
+
+Two terminals instead, if you want separate logs:
+
+```bash
+.venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
+```
+
+```bash
+npm --prefix frontend run dev
+```
+
+Knows 26 words → 9 word signs (`hello`, `please`, `sorry`, `yes`, `no`, `me`,
+`you`, `bye`, `thanks`…). Anything else is fingerspelled letter by letter.
+Try `hello please yes`.
+
+Verify the backend independently of the browser:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/translate -H 'Content-Type: application/json' -d '{"text":"hello please"}'
+```
+
+Expect `{"gloss":["HELLO","PLEASE"],...}`.
+
+---
+
+## New pipeline — text → captured motion
+
+Needs **only** Vite. No backend, no `.vrma`.
+
+```bash
+npm --prefix frontend run dev
+```
+
+Open **http://localhost:5173/signer.html**
+
+(If `npm run dev:all` is already running, this page is served too — just open
+the URL. Do not start a second Vite; the port is taken.)
+
+| Type | Performs | Captured from |
+|---|---|---|
+| `hello` / `hi` / `hey` | `HELLO` | `MVI_0029.MOV` |
+| `alright` / `okay` / `ok` | `ALRIGHT` | `MVI_0037.MOV` |
+| `good morning` / `morning` | `GOOD_MORNING` | `MVI_0042.MOV` |
+| `good afternoon` / `afternoon` | `GOOD_AFTERNOON` | `MVI_0046.MOV` |
+| `how are you` | `HOW_ARE_YOU` | `MVI_0033.MOV` |
+
+Phrases match longest-first, so `good morning` is **one** sign. Words with no
+captured sign are skipped — there are no letter clips here, so it cannot
+fingerspell.
+
+Finger jitter is tunable live, no code edit:
+
+```
+http://localhost:5173/signer.html?smooth=0.93
+```
+
+`0` disables damping, values approaching `1` damp harder but make the fingers
+trail the wrist. Default `0.9`. The active value is logged on load.
+
+---
+
+## Pipeline 2 — video → skeleton → avatar
+
+Its own server, independent of the other two.
+
+```bash
+.venv/bin/python -m uvicorn pipeline.app:app --host 127.0.0.1 --port 8001 --reload
+```
+
+Open **http://localhost:8001/**, drop a video, press **Run**. Three panes:
+source video, skeleton, VRM mirroring the motion. Outputs land in
+`pipeline/outputs/`.
+
+From the command line:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8001/api/extract?space=world&extractor=mediapipe" -F "file=@offline/datasets/isl_greeting/hello/MVI_0029.MOV" -o out.json
+```
+
+Extractors: `mediapipe` (default, body + fingers), `yolo` (body only),
+`hybrid_yolo_mediapipe`. The two `smplx` options return **501** — not
+implemented, they need model weights.
+
+---
+
+## Running all three at once
+
+```bash
+npm run dev:all
+```
+
+```bash
+.venv/bin/python -m uvicorn pipeline.app:app --host 127.0.0.1 --port 8001 --reload
+```
+
+Two terminals, three apps: `localhost:5173/`, `localhost:5173/signer.html`,
+`localhost:8001/`.
+
+---
+
+## Opening it on your phone
+
+Bind Vite to all interfaces:
+
+```bash
+npm --prefix frontend run dev -- --host 0.0.0.0
+```
+
+Vite prints several `Network:` URLs — pick the one matching your Wi-Fi adapter
+(`ipconfig getifaddr en0`). Open `http://<that-ip>:5173/signer.html`.
+
+Pipeline 1 works over the network too: the browser talks to Vite, and Vite
+proxies `/api` to the backend on localhost, so the backend does **not** need
+`--host` and CORS never comes into play.
+
+Requirements: phone and Mac on the same Wi-Fi; macOS firewall must allow
+incoming connections for `node`; guest networks with client isolation will block
+it silently.
+
+---
+
+## Adding a sign to the new pipeline
+
+**1.** Extract (pipeline 2 running):
+
+```bash
+curl -s -X POST "http://127.0.0.1:8001/api/extract?space=world&extractor=mediapipe" -F "file=@offline/datasets/isl_greeting/how_are_you/MVI_0033.MOV" -o /tmp/raw.json
+```
+
+**2.** Write the stream out as a sign asset:
+
+```bash
+python3 -c "import json; r=json.load(open('/tmp/raw.json')); s=r['stream']; s['meta']['gloss']='HOW_ARE_YOU'; json.dump({'meta':s['meta'],'frames':s['frames']}, open('public/skeleton/how_are_you.json','w'))"
+```
+
+**3.** Add one line to `frontend/signer/SignLibrary.ts`:
+
+```ts
+{ gloss: 'HOW_ARE_YOU', path: '/skeleton/how_are_you.json', words: ['how are you'] },
+```
+
+No manifest, no vocabulary, no backend reload.
+
+---
+
+## Tests
+
+```bash
+.venv/bin/python -m unittest discover -s tests -t .
+```
+
+> Reports **one expected failure**: digits `0`–`9` exist in
+> `backend/language/alphabet.json` but have no manifest entry, so they caption
+> without animating. Known gap, not a regression.
+
+---
+
+## If a port is taken
+
+`BACKEND_PORT` is read by the backend, by `vite.config.ts` (for the `/api`
+proxy) and by `scripts/dev.mjs`, so one variable moves everything:
+
+```bash
+BACKEND_PORT=8010 npm run dev:all
+```
+
+To make it permanent, set `backend.port` in `config.yaml`. Find the holder:
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN
+```
+
+## Gotchas
+
+- **Vite may bind IPv6 only**, so `localhost:5173` works but `127.0.0.1:5173`
+  does not. Force IPv4 with `npm --prefix frontend run dev -- --host 127.0.0.1`.
+- **A backgrounded browser tab throttles `requestAnimationFrame`**, so a sign
+  appears to hang until you switch back to it. Normal browser behaviour.
+- **Pipeline 2 has no upload size limit** and never prunes `pipeline/outputs/`.
+- **Skeleton assets are ~300-400 KB each**, fetched on demand. `.vrma` clips are
+  all preloaded at boot by pipeline 1.
