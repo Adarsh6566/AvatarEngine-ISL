@@ -4,6 +4,322 @@ Every file modification in this repository is recorded here. See `AGENTS.md` §5
 
 ---
 
+## 2026-08-21 — new pipeline: loading spinner and 1x-5x speed control
+
+Brought the two UI affordances the `.vrma` app has across to the signer, by **reusing the same components** rather than reimplementing them — both are generic DOM widgets with no coupling to pipeline 1's logic.
+
+### `frontend/signer/main.ts`
+- Imports and mounts `ui/ActivityIndicator` and `ui/PlaybackSpeedControl`.
+- Spinner shows while the VRM loads at boot, and while a skeleton stream is fetched on first use (streams are 300-400 KB and fetched on demand). Wrapped in `try/finally` so a failed fetch still hides it; cache hits return before it is shown.
+- Added a `playbackRate` variable applied to the cursor advance: `cursor += delta * fps * playbackRate`. Speeds come from `config.yaml` (`animation.playback_speeds`) via `APP_CONFIG`, so both pipelines cycle the same 1x → 5x → 1x steps.
+
+### `frontend/signer.html`
+- Added `.activity`, `.activity__spinner`, `@keyframes activity-spin` and `.speed-control` styles copied from `style.css` so the signer keeps its self-contained stylesheet while looking identical to the other app. Accent colour bound to the signer's `--accent`.
+- Added a `prefers-reduced-motion` rule slowing the spinner, matching pipeline 1.
+- **Fixed a collision found during testing:** the speed control is `fixed` bottom-right while the `knows:` hint spans the bar, so below ~820 px the hint ran underneath the button (measured 56 px overlap at 512 px wide). Added `@media (max-width: 820px) { .bar__hint { padding-right: 92px } }`. Pipeline 1 never had this because its bar has no hint line.
+
+### Verification
+- `npx tsc --noEmit` exit 0.
+- Speed control measured against the 3.24 s `how are you` clip, cache warm so this is playback not fetch:
+
+  | label | measured | expected |
+  |---|---|---|
+  | 1x | 3.24 s | 3.24 |
+  | 2x | 1.65 s | 1.62 |
+  | 3x | 1.08 s | 1.08 |
+  | 4x | 0.83 s | 0.81 |
+  | 5x | 0.66 s | 0.65 |
+
+  Cycles back to 1x after 5x.
+- Spinner verified: hidden at rest (`opacity 0`), `opacity 1` with `animation-name: activity-spin` and the accent border when active, positioned 20 px from the top-right.
+- Hint/button clearance: 1280 px → no padding applied, text ends 254 px clear; 375 px → 92 px padding applied, text ends 36 px clear.
+
+### Noticed, not changed
+The signer shows the VRM's raw **T-pose** until the first sign plays. Pipeline 1 avoids this via `AvatarController.applyNaturalPose()`; the signer deliberately applies no pose, because `captureRest()` must measure the T-pose. Fixing it means posing *after* the capture — a small addition, but out of scope for this change.
+
+---
+
+## 2026-08-21 — README: make the two-server requirement for pipeline 1 explicit
+
+### `README.md`
+- Rewrote "Running the pipelines". The table now states, per app, **whether it needs the backend** — the fact that was missing and that caused a real confusion: starting only Vite makes pipeline 1's page load while nothing signs, because every translation goes to `:8000`. The new pipeline has no backend, so it keeps working, which makes it look like "only the signer runs".
+- Added that failure as a call-out with the one-line check (`curl -s http://127.0.0.1:8000/health`).
+- Added: a "running all three at once" section (two terminals, three apps); phone access via `--host 0.0.0.0`, noting the backend does **not** need `--host` because the browser talks to Vite and Vite proxies `/api` server-side, so CORS never applies; the `?smooth=` finger-damping override; `how are you` in the sign table; and the rAF-throttling gotcha for backgrounded tabs.
+
+---
+
+## 2026-08-21 — new pipeline: viewport-aware avatar framing for portrait screens
+
+On a phone-shaped viewport the avatar's feet sat behind the input bar and the caption crowded the head. The caption and input bar are `position: fixed` over the canvas, so on a tall narrow screen they cover a far larger fraction of the height than they do on a desktop window — roughly a third rather than a seventh.
+
+### `frontend/signer/main.ts`
+- Extracted `DESKTOP_DISTANCE` (4.6), `DESKTOP_TARGET_Y` (1.2) and `CAMERA_RISE` (0.15) as named constants; the `RenderEngine` camera and the OrbitControls target now build from them instead of repeating literals.
+- Added `frameCamera()`: **measures** the live heights of `.bar` and `.caption`, derives the usable vertical band between them, and computes the camera distance and look-at that fit the avatar (world extent 0.15 → 2.05, plus 8% breathing room) inside that band, centring it on the band rather than on the viewport.
+- Added `captionReserve()`: measures the caption while temporarily holding the **longest phrase in the library**, so the reserve is the worst case. Measuring the live caption instead would move the camera mid-sign, since the caption is empty when idle and grows when a sign starts.
+- Blending is on **aspect ratio**, not a pixel breakpoint: `t = clamp((1.2 - aspect) / (1.2 - 0.6), 0, 1)`. At aspect ≥ 1.2 `t` is 0 and the desktop framing is used verbatim; at ≤ 0.6 the fitted framing is used; between, it interpolates. Distance is clamped so it can only ever move the camera **back**, never closer than desktop.
+- Re-frames on container resize via `ResizeObserver`, falling back to a `window` resize listener.
+- Moved the `captionRoot` declaration up beside the other UI lookups. Left where it was, `frameCamera()`'s init call hit it in the temporal dead zone — `ReferenceError: Cannot access 'captionRoot' before initialization` — which threw during module evaluation, so `engine.start()` never ran and the canvas stayed empty. Caught during testing.
+- Added a non-nullable `container` alias for `#app`, since TypeScript does not carry the null-narrowing into the `frameCamera` closure.
+
+### Not changed
+VRM, retargeting, animation timing, backend, CSS, and pipeline 1 — all untouched.
+
+### Verification
+- `npx tsc --noEmit` exit 0.
+- **1280×800** (aspect 1.60): blend `t = 0`, framing identical to before at 4.6 / 1.2 — desktop preserved by construction, not by eye.
+- **375×812** (aspect 0.46): whole avatar visible; boots end ≈625 px with the bar top at 657, caption ends at 116 with the head top ≈150 — roughly 32 px clear at both ends.
+- **430×932** (aspect 0.46): whole avatar visible; boots end ≈723 px with the bar top at 777 — ≈54 px clear.
+- Signing verified at each size; no horizontal overflow (`body.scrollWidth` equals viewport width).
+
+### Known, deliberately left alone
+On a **short desktop window** (e.g. 1280×800, aspect 1.6) the feet still tuck behind the input bar, exactly as before this change — the brief was to preserve desktop. Removing the aspect blend would fit the avatar at every aspect, at the cost of altering the desktop framing.
+
+---
+
+## 2026-08-21 — new pipeline: finger smoothing raised to 0.9, tunable via URL
+
+`fingerSmoothing: 0.7` was still visibly jittery on `how are you`. Re-measured on a wider bone set and raised the default.
+
+### Where the noise actually is (measured, not assumed)
+- It is **not** concentrated in depth. Frame-to-frame change on `rIndex1→rIndex2` splits **X 35% / Y 40% / Z 25%**, so damping one axis (as `smooth.py` does for the spine) would not help.
+- The real cause is scale: those finger segments are only **0.013–0.016** view units long while jittering **~0.002 per frame** — a ~15% perturbation on a short vector. `normalize()` converts that into a large angular swing, which is why short bones flail and long ones (arms) do not.
+
+### `frontend/signer/main.ts`
+- Default `fingerSmoothing` **0.7 → 0.9**. Measured across 5 right-hand finger bones over 400 frame transitions, counting frames that jump more than 10°:
+
+  | fingerSmoothing | mean °/frame | worst | frames >10° |
+  |---|---|---|---|
+  | 0.7 | 4.21 | 31.4° | 38 / 400 |
+  | 0.85 | 2.73 | 17.9° | 11 / 400 |
+  | **0.9** | **2.39** | **14.6°** | **5 / 400** |
+  | 0.93 | 1.80 | 9.2° | 0 / 400 |
+
+  0.9 removes ~87% of the visible spikes. Beyond that the fingers begin trailing the wrist — at 25 fps the blend settles over roughly `1/(1-s)` frames.
+- Added a URL override, `?smooth=` (accepts 0 to <1, falls back to the default on anything invalid), and a startup log of the active value, so the trade-off can be judged by eye without a code edit.
+
+### Verification
+- `npx tsc --noEmit` exit 0.
+- Playback rate unaffected by damping: `how are you` completes in 3.27 s and 3.20 s against a 3.24 s clip; `hello` in 2.53 s against 2.52 s.
+- Note for future measurement: a **backgrounded tab throttles `requestAnimationFrame`**, so timings taken while the tab is not fronted are meaningless (one such run read 10.19 s for a 3.24 s clip).
+
+---
+
+## 2026-08-21 — new pipeline: full finger articulation with damped rotation
+
+`fingerMode: 'prox'` (previous entry) fixed the flailing by dropping two bones per finger, but the hands read as stiff — and handshape carries meaning in ISL. Restored full articulation and attacked the noise at the rotation level instead.
+
+### `frontend/avatar/animation/SkeletonRetargeter.ts`
+- Added `fingerSmoothing` to `RetargetOptions` (default **0** — `VrmRenderer` and the viewer are unaffected), a `prevLocal` map, and `reset()`.
+- When `fingerSmoothing > 0`, each finger bone's local rotation is slerped toward the previous frame's by that factor before being written. Arms and torso are untouched: their segments are long enough that direction is stable.
+- `reset()` clears the history so a new clip does not start dragged toward the previous clip's final pose.
+
+### `frontend/signer/main.ts`
+- `{ fingerMode: 'full', fingerSmoothing: 0.7 }`; `retargeter.reset()` on each new sign.
+- 0.7 chosen from measurement, not taste. Frame-to-frame rotation change across right index proximal, middle proximal and index intermediate on `how_are_you`:
+
+  | fingerSmoothing | mean °/frame | worst single-frame jump |
+  |---|---|---|
+  | 0 (off) | 7.69 | **72.4°** |
+  | 0.4 | 5.32 | 51.7° |
+  | 0.55 | 5.17 | 36.2° |
+  | ~~0.7~~ (superseded — still visibly jittery) | 3.67 | 25.4° |
+  | 0.8 | 3.44 | 20.9° |
+  | 0.88 | 2.31 | 12.7° |
+
+  72° in a single 40 ms frame is the flailing. Higher factors damp further but settle slower: at 25 fps, 0.88 takes ~0.33 s and mutes fast handshape changes, whereas 0.7 settles in ~0.13 s.
+
+### Verification
+- `npx tsc --noEmit` exit 0.
+- `hello` completes in 2.53 s (2.52 s clip), `how are you` in 3.27 s (3.24 s clip) — playback rate unaffected by the damping.
+- Open question for the author: whether 0.7 still shows residual jitter on the fastest handshape transitions. If so the next lever is the capture itself — `pipeline/extractor/smooth.py` currently uses `alpha 0.45` for FINE joints — rather than more rotation damping.
+
+---
+
+## 2026-08-21 — new pipeline: fix HELLO signing backwards, damp finger noise
+
+Two reported defects: HELLO's arm bent backwards as if signing behind the avatar, and HOW_ARE_YOU's fingers moved unnaturally as the right arm rose. Both diagnosed from the data.
+
+### `public/skeleton/hello_captured.json` (new)
+- Re-captured `MVI_0029.MOV` through `pipeline.app` (`mediapipe`, `space=world`): 63 frames @ 25 fps, 289 KB, pipeline dialect.
+- **Root cause of the backwards arm:** `public/skeleton/hello.json` is the old offline artifact in raw `mediapipe_image_normalized` space. `SkeletonStream.toViewSpace()` flips **Y** (`space` contains "Y down") but **never touches Z**, whereas `pipeline/extractor/normalize.py` flips Z for world-space captures ("mediapipe world Z is mirrored vs Three.js right-handed"). So HELLO alone never received the depth correction the other four signs did, and its entire arm chain was mirrored in Z.
+- Measured at the peak frame of the wave — same pose, inverted depth:
+
+  | | shoulder Z | elbow Z | wrist Z | elbow angle |
+  |---|---|---|---|---|
+  | old `hello.json` | −0.176 | −0.494 | −0.942 | 111.1° |
+  | new `hello_captured.json` | +0.158 | +0.380 | +0.744 | 112.4° |
+
+  Mean Z(rWrist − rShoulder) went from **−0.462** (hands behind the body) to **+0.297** (in front). A signer's hands are always in front.
+- Written to a NEW path rather than overwriting `public/skeleton/hello.json`, which stays as the committed default fixture for `skeleton-viewer.html`.
+
+### `frontend/signer/SignLibrary.ts`
+- `HELLO` now points at `/skeleton/hello_captured.json`.
+
+### `frontend/signer/main.ts`
+- ~~`SkeletonRetargeter` constructed with `{ fingerMode: 'prox' }`~~ — **superseded the same day**: `'prox'` read as stiff and lost handshape. Replaced by `'full'` + `fingerSmoothing`; see the entry above.
+- **Root cause of the finger flailing:** finger depth is the capture's least reliable channel. In `how_are_you.json` the right index proximal segment swings **0.0080 → 0.0366** in view units across frames 15–23 (a 4.5× change in a physically fixed bone) exactly where the arm rises. The retargeter normalises that segment to derive a direction, so as its length collapses toward zero the direction becomes noise and the finger flails. Driving one bone per finger instead of three removes the two noisiest and keeps the handshape readable.
+- Comment records the measurement and the `'full'` / `'off'` alternatives so the trade-off is tunable.
+
+### Verification
+- `npx tsc --noEmit` exit 0.
+- Signer plays HELLO with the caption visible; library hint unchanged at 5 signs.
+- Not yet judged: whether `'prox'` loses too much handshape detail for ISL. `'full'` restores all three bones per finger if the flailing is preferable to the loss of articulation.
+
+---
+
+## 2026-08-21 — new pipeline: add HOW_ARE_YOU
+
+### `public/skeleton/how_are_you.json` (new)
+- Captured from `offline/datasets/isl_greeting/how_are_you/MVI_0033.MOV` through `pipeline.app` (`mediapipe`, `space=world`): 81 frames @ 25 fps, 3.24 s, 369 KB, pipeline dialect, `meta.gloss = HOW_ARE_YOU`.
+- Capture quality: **81/81 frames have both wrists tracked** — no visibility dropouts to interpolate across.
+
+### `frontend/signer/SignLibrary.ts`
+- Added one `SIGN_LIBRARY` entry: `HOW_ARE_YOU` → `/skeleton/how_are_you.json`, words `['how are you', 'how are u', 'howdy']`. Library is now 5 signs.
+- `LONGEST` is derived from the library, so it widened from 2 to 3 words automatically and `how are you` matches as ONE sign rather than three unknown words.
+
+### Verification
+- `npx tsc --noEmit` exit 0.
+- In-app: `[signer] HOW_ARE_YOU: 81 frames @ 25fps`; the sign completed in **3.81 s** = 3.24 s clip + ~0.57 s first fetch, then the button re-enabled.
+- Caption verified live: `data-state="active"`, `opacity: 1`, text `how are you`, gloss `HOW_ARE_YOU`.
+- Hint line now reads `hello · alright · good morning · good afternoon · how are you`.
+- Note: playback is driven by `requestAnimationFrame`, so a **backgrounded tab throttles it** and a sign appears to hang until the tab is fronted. Normal browser behaviour, same as any rAF animation; not specific to this pipeline.
+
+---
+
+## 2026-08-21 — REVERT the merge; captured motion becomes its OWN app
+
+The previous entry mixed `.vrma` clips and captured skeleton motion onto the same avatar in the same app. That is not wanted: pipeline 1 must stay exactly as it was, and captured motion belongs in a separate application. Reverted the merge and rebuilt the captured-motion path standalone.
+
+### Reverted to original (via `git checkout`, no residue)
+`backend/language/translator.py`, `backend/mapper.py`, `backend/vocabulary.json`, `data/motion_manifest.json`, `frontend/avatar/animation/AnimationController.ts`, `frontend/avatar/controller/AvatarController.ts`, `frontend/avatar/gestures/GestureRegistry.ts`, `frontend/main.ts`, `frontend/motion/DatasetLoader.ts`, `frontend/motion/MotionCatalog.ts`, `frontend/motion/MotionPlayer.ts`, `frontend/motion/MotionProcessor.ts`, `frontend/motion/loaders/MotionLoader.ts`, `frontend/sign/Sequencer.ts`, `public/skeleton/hello.json`.
+- Deleted `frontend/motion/loaders/SkeletonLoader.ts` (only existed to serve the merge).
+- Pipeline 1 is byte-identical to its committed state: 37 manifest entries, 26 vocabulary words, no `skeletonPath`, no skeleton mode on `AvatarController`, no `suspend()`/`resume()` on `AnimationController`.
+- Verified: `POST /translate` gives `hello → [HELLO]`, `please → [PLEASE]`, `good morning → [G,O,O,D,M,O,R,N,I,N,G]` (fingerspelled, as originally). In-app `"hello please yes"` captions and plays HELLO → PLEASE → YES off the mixer.
+
+### `frontend/signer.html` (new)
+- Standalone page for the captured-motion signer. Self-contained styles (does not import pipeline 1's `style.css`), a `captured motion · no .vrma` badge, text input, caption, and a hint listing the phrases the library knows.
+
+### `frontend/signer/SignLibrary.ts` (new)
+- `SIGN_LIBRARY` (4 entries), `matchSigns()` (longest-phrase-first so `good morning` is ONE sign), `knownPhrases()`. No backend, no vocabulary.json, no manifest — this app's dictionary is this file.
+- Unknown words are skipped, not fingerspelled: there are no letter clips in this pipeline.
+
+### `frontend/signer/main.ts` (new)
+- Composition root: `RenderEngine` + `VrmLoader` + `SkeletonRetargeter` only. No `AnimationMixer`, no `AvatarController`, no `.vrma`. `captureRest()` runs immediately after load while the model is still in its T-pose — nothing here applies a resting pose, so the capture is clean by construction.
+- Playback advances a cursor on the engine tick at the stream's own fps and resolves a promise on the final frame, which is held (matching how a one-shot clip clamps). Streams are fetched on demand and cached.
+- Fixed during verification: `data-state` was being set on `.caption__box` instead of the outer `.caption`, so the caption never became visible. Now resolved via `caption.closest('.caption')`.
+
+### `frontend/vite.config.ts`
+- Added `signer: 'signer.html'` to `build.rollupOptions.input`. Third entry alongside `main` and `skeleton-viewer`; pipeline 1's entry untouched.
+
+### Kept from the previous work (still correct, still used)
+- `frontend/avatar/animation/SkeletonRetargeter.ts` — now consumed by `VrmRenderer` and the new signer.
+- `frontend/skeleton/SkeletonStream.ts` dialect aliasing — a genuine bug fix; without it offline-dialect streams render a T-pose.
+- `frontend/skeleton/VrmRenderer.ts` delegation.
+- `public/skeleton/{alright,good_morning,good_afternoon}.json` — the three new captured signs. `hello.json` is back to its committed offline-dialect version and works via the alias layer.
+
+### Verification
+- `npx tsc --noEmit` exit 0.
+- Signer: `good morning` held its caption for exactly 3.40 s — 85 frames @ 25 fps — then resolved and reset, confirming the cursor advances at the stream's real rate. Console logs `[signer] GOOD_MORNING: 85 frames @ 25fps`.
+- The two apps share no runtime state: separate pages, separate avatars, separate dictionaries.
+
+---
+
+## 2026-08-21 — README: run instructions for all three pipelines
+
+### `README.md`
+- Appended a "Running the pipelines" section covering the three runnable things, with a table stating plainly that **pipeline 1 and the new sign-from-video pipeline are the same application** (same servers, same URL) — what differs is whether a sign resolves to a captured skeleton stream (4) or a `.vrma` clip (36). Pipeline 2 is separate on `:8001`.
+- Contents: one-time setup; `npm run dev:all` and the two-terminal equivalent; a table of what to type and which source video each captured sign came from; `curl` health/translate verification with expected output; pipeline 2 via UI and via `/api/extract`; a 6-step "adding a new sign" workflow (extract → write asset → manifest entry → vocabulary → `/admin/reload-vocab` → run tests) that documents how pipeline 2 feeds the new pipeline; the `BACKEND_PORT` override for port conflicts; and gotchas (Vite IPv6-only binding, pipeline 2 has no upload cap and never prunes `outputs/`, skeleton assets fetch on demand).
+- Notes the expected `unittest` failure (digits 0–9 have no manifest entry) so a first-time reader does not read it as a regression.
+- Why: three runnable surfaces across two ports with a shared config, and no single place said how to start them or how the halves connect.
+- Verified: `npm run dev:all` exists in `package.json`; the documented `python3 -c` one-liner parses; `POST /admin/reload-vocab` returns `{"status":"reloaded","entries":"33"}`; the manifest example matches the real `GOOD_MORNING` entry field for field.
+
+---
+
+## 2026-08-21 — D3: text → captured-motion signing in the main app
+
+Typing `hello`, `alright`, `good morning`, `good afternoon` now makes the avatar perform the motion captured from the real ISL videos, in the pipeline-1 UI. Four signs are skeleton-backed; the other 36 still play their `.vrma` clips unchanged.
+
+### `frontend/skeleton/SkeletonStream.ts`
+- Added `buildJointAliases()`, `JOINT_ALIASES`, exported `canonicalJointName()`, and `aliasJoints()`; `parseSkeletonStream()` now canonicalises joint spec names, their `parent` refs, and every frame's joint keys. Offline dialect (`leftShoulder`, `leftIndexMCP`, `leftThumbCMC/MCP/IP/TIP`, `leftHandWrist`) maps to the pipeline dialect (`lShoulder`, `lIndex1..4`, `lThumb1..3`, `lHand`); MCP→1, PIP→2, DIP→3, TIP→4; offline's thumb CMC is dropped. Streams already in the pipeline dialect are returned untouched (no allocation).
+- Why: fixes the pre-existing bug logged in the entry below — offline-dialect streams left every driven bone unresolved, so the VRM rendered a permanent T-pose. Fixing it at the single read point means the viewer and the app both get it.
+- Verified: `skeleton-viewer.html?renderer=vrm` at frame 30 now renders the HELLO pose instead of a T-pose.
+
+### `frontend/avatar/controller/AvatarController.ts`
+- Added `playSkeleton(frames, fps)`, `stopSkeleton()`, `isPlayingSkeleton`, private `stepSkeleton()`, a `skeleton` cursor field, and a `SkeletonRetargeter` instance. The per-frame tick now drives either skeleton playback or the mixer, never both. `relax()` also stops skeleton playback. `load()` calls `retargeter.captureRest(vrm)` **before** `applyNaturalPose()`.
+- Why: one VRM, two drivers (D3). Rest must be measured in the T-pose — `applyNaturalPose()` rotates the upper arms ~80° down, and capturing after it would bake that into every rest direction.
+
+### `frontend/avatar/animation/AnimationController.ts`
+- Added `suspend()` (stops all actions, clears `current`) and `resume()` (drops cached actions so they rebuild).
+- Why: the mixer and the retargeter both write the normalized humanoid bones; without stopping the actions the pose flickers between them depending on tick order.
+
+### `frontend/avatar/gestures/GestureRegistry.ts`
+- `getAll()` now filters to entries whose `assetPath` ends in `.vrma`.
+- Why: skeleton-backed entries carry a `.json` `assetPath`; handing those to `VRMAGestureLoader` made GLTFLoader throw `Unsupported asset` and dropped boot registration to 37/40. Now 37/37.
+
+### `frontend/motion/loaders/SkeletonLoader.ts` (new)
+- `MotionLoader` implementation projecting a `MotionReference` to a `LoadedMotion` carrying `skeletonPath`. Streams are fetched on demand (they are ~300–400 KB each), not preloaded like `.vrma`.
+
+### `frontend/motion/DatasetLoader.ts`
+- Enabled the stubbed dataset switch: `case "skeleton": return this.skeleton;`. `manual`/untagged entries still fall through to `VRMALoader`.
+
+### `frontend/motion/MotionCatalog.ts`, `frontend/motion/loaders/MotionLoader.ts`, `frontend/motion/MotionProcessor.ts`
+- Added optional `dataset` and `skeletonPath` to `MotionReference`, `skeletonPath` to `LoadedMotion` and `ProcessedMotion`, and carried it through `process()`.
+
+### `frontend/motion/MotionPlayer.ts`
+- `play()` is now `async`: a `skeletonPath` motion is fetched via `loadSkeletonStream` + `toViewSpace`, cached in a `Map`, and handed to `avatar.playSkeleton()`; everything else takes the unchanged `playGesture` path.
+
+### `frontend/sign/Sequencer.ts`
+- `await`s `player.play()`. Captured motion holds for its own real `duration` (floored at `MIN_HOLD_SECONDS`) instead of being clamped by `MAX_HOLD_SECONDS`.
+- Why: the 3 s cap exists because hand-authored `.vrma` are padded to ~10.4 s. Captured clips are their true length, so the cap would cut `good afternoon` (3.64 s) short.
+
+### `frontend/main.ts`
+- Explicit camera: `fov: 30, position: [0, 1.35, 4.6], target: [0, 1.2, 0]`; OrbitControls target matched.
+- Why: the default framing put the head behind the caption and the feet under the input bar. The signer is now fully in frame and centred, with clearance above and below.
+
+### `public/skeleton/hello.json`, `alright.json`, `good_morning.json`, `good_afternoon.json`
+- Regenerated/added from `offline/datasets/isl_greeting/` (`MVI_0029`, `MVI_0037`, `MVI_0042`, `MVI_0046`) through `pipeline.app` (`mediapipe`, `space=world`) at 25 fps: 63 / 73 / 85 / 91 frames. All in the pipeline dialect with `meta.gloss` set. `hello.json` previously held an offline-dialect artifact and was replaced.
+
+### `data/motion_manifest.json`
+- `HELLO` gains `dataset: "skeleton"`, `skeletonPath: /skeleton/hello.json`, `duration: 2.52`, `motionId: video_hello_v3`; keeps its `.vrma` `assetPath` so the clip stays referenced. Added `ALRIGHT`, `GOOD_MORNING`, `GOOD_AFTERNOON` (40 entries total).
+
+### `backend/vocabulary.json`
+- Added `alright`/`okay`/`ok` → `ALRIGHT`, `good morning`/`morning` → `GOOD_MORNING`, `good afternoon`/`afternoon` → `GOOD_AFTERNOON` (33 entries). Keys may now contain spaces.
+
+### `backend/mapper.py`
+- Added `get_phrases()` returning multi-word vocabulary entries keyed by word tuple.
+
+### `backend/language/translator.py`
+- `segment()` now greedily matches the longest multi-word phrase before falling back to per-word resolution; a matched phrase becomes ONE segment captioned with the whole phrase.
+- Why: the recogniser splits on whitespace, so `"good morning"` could never match a vocabulary key and was fingerspelled G-O-O-D M-O-R-N-I-N-G.
+- Verified: `segment("hello good morning")` → `[('hello',['HELLO'],False), ('good morning',['GOOD_MORNING'],False)]`.
+
+### Verification
+- `npx tsc --noEmit` exit 0; `python -m unittest discover -s tests -t .` → 4 tests, 1 failure (the pre-existing digits gap, unchanged).
+- In-app: all four phrases logged `playing captured motion` with frame counts matching their source videos exactly (63/73/85/91 @ 25fps); boot registration back to 37/37.
+- Motion confirmed animating, not static: 8 canvas samples over 3.2 s during `good afternoon` were all pixel-distinct.
+
+---
+
+## 2026-08-21 — D3 skeleton playback: extract the retarget core
+
+### `frontend/avatar/animation/SkeletonRetargeter.ts` (new)
+- Extracted verbatim from `frontend/skeleton/VrmRenderer.ts`: the `Drive` interface, `sideDrives()`, the `DRIVES` table (39 entries), the `LEG_BONES`/`TORSO_BONES`/`FINGER_BONES`/`FINGER_NONPROXIMAL` sets, `captureRest()`, and the per-frame pose loop. Public surface is `captureRest(vrm)`, `applyPose(vrm, joints)`, `hasRest`; options come from a `RetargetOptions` object (`DEFAULT_RETARGET_OPTIONS` = root identity, legs off, body off, fingers full, no axis remap) instead of being read from `window.location.search`. Owns no VRM, adds no lights, touches no scene.
+- Class docstring records the ordering hazard: `captureRest()` must run while the VRM is in its T-pose, because `AvatarController.applyNaturalPose()` rotates the upper arms ~80° down and that would be baked into every rest direction.
+- Why: D3 — one implementation of the position→rotation math shared by `VrmRenderer` (viewer) and, next, `AvatarController` (app), so the two cannot drift. Retarget math unchanged; this is a code move.
+
+### `frontend/skeleton/VrmRenderer.ts`
+- Now delegates to `SkeletonRetargeter`. Removed the `Drive`/`sideDrives`/`DRIVES`/bone-set/`captureRest`/pose-loop code (moved, not rewritten); kept VRM ownership, its own lights, `attach`/`detach`/`dispose`, and stream/frame management. The URL debug knobs moved into a `readDebugOptions()` helper feeding `RetargetOptions`, so they stay viewer-only and cannot alter how the app signs. 335 → 144 lines.
+- Why: D3 — the renderer keeps the scene-side concerns it already owned; only the math left.
+- Verified: `npx tsc --noEmit` exit 0. Regression-checked against `skeleton-viewer.html?renderer=vrm` at `/skeleton/hello.json` frame 30 — render is pixel-identical before and after (both T-pose, see the pre-existing bug below), and a direct A/B in the page returned the same `rightUpperArm` quaternion for old and new code paths.
+
+### KNOWN BUG (pre-existing, not introduced here): `public/skeleton/*.json` cannot drive the VRM
+- `public/skeleton/hello.json` and `good_morning_full.json` are offline-pipeline artifacts using the offline joint dialect (`leftShoulder`, `leftElbow`, `leftWrist`, `leftHandWrist`, `leftIndexMCP`…). `DRIVES` looks up the pipeline dialect (`lShoulder`, `lElbow`, `lWrist`, `lHand`, `lIndex1`…). Only the 5 torso joints (`hips`/`spine`/`chest`/`neck`/`head`) share names, and those are undriven by default (`driveBody: false`), so **every** driven bone falls to "inherit parent frame, stay at rest" and the avatar renders a permanent T-pose.
+- Proven in-page at frame 30: as-shipped `rightUpperArm` = `[0,0,0,1]` (identity/undriven); with the 8 arm joints aliased to the pipeline dialect = `[0,-0.4774,0.2931,0.8284]` (driven).
+- Confirmed pre-existing by restoring the original 335-line `VrmRenderer.ts` and re-rendering the same frame: identical T-pose.
+- Why it matters: this is the `source_skeleton.v1` dialect drift (two incompatible formats sharing one schema tag) surfacing as a user-visible failure. It blocks D3 — skeleton-backed signs cannot animate until the reader accepts both dialects.
+
+---
+
 ## 2026-08-12
 
 ### `.gitignore`
