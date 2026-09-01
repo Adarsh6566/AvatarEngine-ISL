@@ -206,6 +206,20 @@ export interface RetargetOptions {
    * long enough that direction is stable.
    */
   fingerSmoothing: number;
+  /**
+   * Extra roll of the hands about the direction the fingers point, in degrees.
+   *
+   * The palm's facing is taken from the captured knuckle plane, so this is 0
+   * for faithful playback and exists to settle a disagreement the capture
+   * cannot: whether a signer's own palm angle in a given take matches the form
+   * the sign should have. Judging that needs a reader of the language, not a
+   * measurement, so it is exposed on the signer page as ?palm=<degrees> —
+   * turn the palm until it reads correctly, then bake the value in.
+   *
+   * Rotating about the finger direction changes only which way the palm faces;
+   * where the hand points and how the fingers curl are untouched.
+   */
+  palmRoll: number;
 }
 
 export const DEFAULT_RETARGET_OPTIONS: RetargetOptions = {
@@ -218,6 +232,7 @@ export const DEFAULT_RETARGET_OPTIONS: RetargetOptions = {
   driveBody: false,
   fingerMode: 'full',
   fingerSmoothing: 0,
+  palmRoll: 0,
 };
 
 const _c = new THREE.Vector3();
@@ -388,6 +403,19 @@ export class SkeletonRetargeter {
           .applyQuaternion(Rparent.clone().invert());
         const full = orientationBetween(rest, restAcross, obsLocal, obsAcrossLocal);
         if (full) qLocal = full;
+
+        // Extra roll about the hand's own axis, for dialling palm facing in the
+        // browser without a rebuild (see RetargetOptions.palmRoll). Applied
+        // after the orientation so it rotates the palm about the direction the
+        // fingers point, leaving where the hand points untouched.
+        if (o.palmRoll !== 0) {
+          qLocal = qLocal.multiply(
+            new THREE.Quaternion().setFromAxisAngle(
+              rest,
+              THREE.MathUtils.degToRad(o.palmRoll),
+            ),
+          );
+        }
       }
 
       // Damp finger jitter by blending with the previous frame's rotation.
