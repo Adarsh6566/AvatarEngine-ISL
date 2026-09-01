@@ -79,23 +79,7 @@ const SMOOTHING = (() => {
   return Number.isFinite(n) && n >= 0 && n < 1 ? n : 0.9;
 })();
 
-// Palm facing comes from the captured knuckle plane, so 0 is faithful
-// playback. Whether a given signer's palm angle matches the form the sign
-// should have is a judgement about the language, not something the capture can
-// settle — so it is adjustable live: /signer.html?palm=180 turns the palm
-// half a turn, ?palm=90 a quarter, and so on. Once a value reads correctly it
-// belongs in the code, not the URL.
-const PALM_ROLL = (() => {
-  const raw = new URLSearchParams(window.location.search).get('palm');
-  const n = raw === null ? NaN : Number(raw);
-  return Number.isFinite(n) ? n : 0;
-})();
-
-const retargeter = new SkeletonRetargeter({
-  fingerMode: 'full',
-  fingerSmoothing: SMOOTHING,
-  palmRoll: PALM_ROLL,
-});
+const retargeter = new SkeletonRetargeter({ fingerMode: 'full', fingerSmoothing: SMOOTHING });
 let vrm: VRM | null = null;
 
 // --- playback --------------------------------------------------------------
@@ -272,7 +256,7 @@ try {
   window.addEventListener('resize', frameCamera);
 }
 
-console.info(`[signer] finger smoothing ${SMOOTHING} (?smooth=…), palm roll ${PALM_ROLL}° (?palm=…)`);
+console.info(`[signer] finger smoothing ${SMOOTHING} (override with ?smooth=…)`);
 
 // Same components the .vrma app uses — generic DOM widgets with no coupling to
 // that pipeline's logic, so both apps stay visually consistent.
