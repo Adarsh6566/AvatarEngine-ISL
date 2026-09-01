@@ -53,6 +53,50 @@ def signal_indices(joint_names: tuple[str, ...]) -> np.ndarray:
     return np.asarray(keep, dtype=int)
 
 
+def alignment_features(
+    data: np.ndarray, joint_names: tuple[str, ...], finger_weight: float = 1.0
+) -> np.ndarray:
+    """(T, D) features for time-warping: arms in place, fingers relative to the hand.
+
+    Aligning on raw positions lets the arm decide everything. Finger joints are
+    absolute too, so all forty of them carry the arm's trajectory and contribute
+    it again; the handshape itself, a couple of centimetres of movement against
+    half a metre of arm travel, is lost in the sum. Two takes then align by when
+    the arm was raised and not by when the hand opened, and averaging under that
+    warp blends an open hand into a closed one.
+
+    Subtracting the hand root leaves only articulation, which is enough on its
+    own: weight 1.0 measured best on 'pleased', both for how well the template
+    represents the takes (+7.1% against the best single take, vs +5.9% aligning
+    on raw positions) and for how much of the opening survives (96% of the
+    takes' peak fingertip spread, vs 93%). Amplifying further trades score for
+    little extra range — the warp starts chasing finger noise, the same noise
+    the runtime damps at 0.9.
+
+    Used for ALIGNMENT only; the averaging still runs on raw positions.
+    """
+    index = {n: i for i, n in enumerate(joint_names)}
+    blocks = []
+
+    arms = [index[n] for n in ARM_JOINTS if n in index]
+    if arms:
+        blocks.append(data[:, arms, :].reshape(data.shape[0], -1))
+
+    for side in ("l", "r"):
+        hand = index.get(f"{side}Hand")
+        fingers = [
+            i
+            for i, n in enumerate(joint_names)
+            if n.startswith(side) and any(tok in n for tok in FINGER_TOKENS)
+        ]
+        if hand is None or not fingers:
+            continue
+        relative = data[:, fingers, :] - data[:, [hand], :]
+        blocks.append(relative.reshape(data.shape[0], -1) * finger_weight)
+
+    return np.concatenate(blocks, axis=1) if blocks else data.reshape(data.shape[0], -1)
+
+
 def _dropout_fraction(data: np.ndarray, joint_names: tuple[str, ...]) -> float:
     """Fraction of frames where a wrist is missing or pinned at the origin.
 

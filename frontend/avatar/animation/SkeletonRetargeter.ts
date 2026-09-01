@@ -40,6 +40,52 @@ export interface Drive {
   /** Tip bones (finger/thumb distal) have no child bone to read a rest direction
    *  from; at rest the finger is straight, so use the parent bone's axis instead. */
   restFromParent?: boolean;
+  /**
+   * A second axis across the bone, making its orientation fully determined.
+   *
+   * One direction fixes where a bone points but leaves it free to roll about
+   * that direction, and for the hand that free roll IS the palm's facing. A
+   * second, non-parallel axis across the knuckles pins it, so the palm faces
+   * where the signer's did rather than wherever rest happened to leave it.
+   *
+   * Only the hand declares this. Fingers are single-axis by nature, and the
+   * arm's roll is not observable from joint positions alone.
+   */
+  acrossFrom?: string;
+  acrossTo?: string;
+  restAcrossFrom?: VRMHumanBoneName;
+  restAcrossTo?: VRMHumanBoneName;
+}
+
+/**
+ * Rotation carrying one (primary, secondary) axis pair onto another.
+ *
+ * Both pairs are orthonormalised the same way — primary kept exact, secondary
+ * only used to place the plane — so the result points the bone along `primary`
+ * and rolls it so `secondary` lands as close as the primary allows. Returns
+ * null when either pair is degenerate (parallel or zero-length), leaving the
+ * caller to fall back to the swing.
+ */
+function orientationBetween(
+  restPrimary: THREE.Vector3,
+  restSecondary: THREE.Vector3,
+  obsPrimary: THREE.Vector3,
+  obsSecondary: THREE.Vector3,
+): THREE.Quaternion | null {
+  const basis = (primary: THREE.Vector3, secondary: THREE.Vector3): THREE.Quaternion | null => {
+    const x = primary.clone().normalize();
+    const z = new THREE.Vector3().crossVectors(x, secondary);
+    if (z.lengthSq() < 1e-10) return null; // secondary parallel to primary: no plane
+    z.normalize();
+    const y = new THREE.Vector3().crossVectors(z, x).normalize();
+    return new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().makeBasis(x, y, z),
+    );
+  };
+  const qRest = basis(restPrimary, restSecondary);
+  const qObs = basis(obsPrimary, obsSecondary);
+  if (!qRest || !qObs) return null;
+  return qObs.multiply(qRest.invert());
 }
 
 function sideDrives(Side: 'Left' | 'Right', p: 'l' | 'r'): Drive[] {
@@ -51,7 +97,20 @@ function sideDrives(Side: 'Left' | 'Right', p: 'l' | 'r'): Drive[] {
     // MATCHES its rest (Hand→MiddleProximal). Using Wrist→Hand instead twists the
     // hand by the noisy gap between the body wrist and MediaPipe's hand root, and
     // every finger hangs off this bone, so that error cascades into all of them.
-    { bone: B('Hand'), parent: B('LowerArm'), restChild: B('MiddleProximal'), from: `${p}Hand`, to: `${p}Middle1` },
+    // The across-knuckles axis is what makes the palm face the right way; see
+    // Drive.acrossFrom. Index→Little spans the knuckle fan, so it is the widest
+    // and least noise-sensitive baseline available across the palm.
+    {
+      bone: B('Hand'),
+      parent: B('LowerArm'),
+      restChild: B('MiddleProximal'),
+      from: `${p}Hand`,
+      to: `${p}Middle1`,
+      acrossFrom: `${p}Index1`,
+      acrossTo: `${p}Pinky1`,
+      restAcrossFrom: B('IndexProximal'),
+      restAcrossTo: B('LittleProximal'),
+    },
     // Fingers: 4 captured joints → all three bones driven (proximal 1→2,
     // intermediate 2→3, distal 3→4), so the hand can fully close. Thumb has 3
     // landmarks → proximal (1→2) + distal (2→3).
@@ -168,6 +227,8 @@ export class SkeletonRetargeter {
 
   /** Rest bone directions (normalized), captured from the VRM T-pose. */
   private readonly restDir = new Map<VRMHumanBoneName, THREE.Vector3>();
+  /** Rest across-axis, for the bones that declare one (the hands). */
+  private readonly restAcross = new Map<VRMHumanBoneName, THREE.Vector3>();
   private readonly rootParentWorldQ = new THREE.Quaternion();
   private captured = false;
 
@@ -207,7 +268,15 @@ export class SkeletonRetargeter {
       return n.getWorldPosition(new THREE.Vector3());
     };
     this.restDir.clear();
+    this.restAcross.clear();
     for (const d of DRIVES) {
+      if (d.restAcrossFrom && d.restAcrossTo) {
+        const from = worldPos(d.restAcrossFrom);
+        const to = worldPos(d.restAcrossTo);
+        if (from && to && from.distanceToSquared(to) > 1e-8) {
+          this.restAcross.set(d.bone, to.clone().sub(from).normalize());
+        }
+      }
       if (d.restFromParent) {
         // Tip bone: no child node. At rest the finger is straight, so the tip's
         // axis equals its parent bone's axis (parent-node → this-node direction).
@@ -305,6 +374,21 @@ export class SkeletonRetargeter {
       }
       const obsLocal = _c.clone().applyQuaternion(Rparent.clone().invert()).normalize();
       let qLocal = new THREE.Quaternion().setFromUnitVectors(rest, obsLocal);
+
+      // Hand: recover roll too, so the palm faces where the signer's did. The
+      // swing above is the fallback when the knuckles are missing or collapse
+      // onto the middle axis (a fist seen end-on), where no plane is defined.
+      const restAcross = this.restAcross.get(d.bone);
+      const acrossA = d.acrossFrom ? pos(d.acrossFrom) : null;
+      const acrossB = d.acrossTo ? pos(d.acrossTo) : null;
+      if (restAcross && acrossA && acrossB) {
+        const obsAcrossLocal = acrossB
+          .clone()
+          .sub(acrossA)
+          .applyQuaternion(Rparent.clone().invert());
+        const full = orientationBetween(rest, restAcross, obsLocal, obsAcrossLocal);
+        if (full) qLocal = full;
+      }
 
       // Damp finger jitter by blending with the previous frame's rotation.
       if (o.fingerSmoothing > 0 && FINGER_BONES.has(d.bone)) {

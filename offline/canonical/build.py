@@ -36,7 +36,7 @@ from .dba import (
     resample,
     temporal_smooth,
 )
-from .takes import FINGER_TOKENS, Take, load_sign, signal_indices
+from .takes import FINGER_TOKENS, Take, alignment_features, load_sign, signal_indices
 
 SIGNS = ("good_evening", "good_night", "thank_you", "pleased")
 GLOSS = {s: s.upper() for s in SIGNS}
@@ -114,18 +114,34 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
         return {"sign": sign, "error": f"only {len(kept)} usable takes"}
 
     joint_names = kept[0].joint_names
-    idx = signal_indices(joint_names)
     arrays = [t.data for t in kept]
+
+    # Alignment runs on hand-relative finger features so handshape timing counts
+    # for as much as arm travel; averaging still runs on raw positions.
+    def featurize(a: np.ndarray) -> np.ndarray:
+        return alignment_features(a, joint_names)
+
+    feats = [featurize(a) for a in arrays]
+
+    # Scoring stays in raw joint space — the space the runtime plays and the
+    # viewer sees. Alignment features are a free choice; grading them in their
+    # own space would only prove they optimise themselves.
+    idx = signal_indices(joint_names)
+
+    def raw_feat(a: np.ndarray) -> np.ndarray:
+        return a[:, idx, :].reshape(a.shape[0], -1)
+
+    raw_feats = [raw_feat(a) for a in arrays]
 
     n_frames = int(np.median([t.n_frames for t in kept]))
     fps = float(np.median([t.fps for t in kept]))
 
-    D = distance_matrix(arrays, idx)
+    D = distance_matrix(feats)
     off = D[~np.eye(len(arrays), dtype=bool)]
     split_score, labels = two_way_split_quality(D)
     med_i = medoid(D)
 
-    raw, history = barycenter(arrays, idx, n_frames)
+    raw, history = barycenter(arrays, featurize, n_frames)
 
     parents = {j["name"]: j.get("parent") for j in _meta_of(cache, sign)["joints"]}
     lengths = median_bone_lengths(arrays, joint_names, parents)
@@ -150,7 +166,8 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
 
     # How well does each candidate represent the set? Lower is better.
     def mean_distance(seq: np.ndarray) -> float:
-        return float(np.mean([dtw(seq, t, idx)[0] for t in arrays]))
+        sf = raw_feat(seq)
+        return float(np.mean([dtw(sf, f)[0] for f in raw_feats]))
 
     canon_score = mean_distance(canonical)
     medoid_score = mean_distance(resample(arrays[med_i], n_frames))
