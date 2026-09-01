@@ -13,6 +13,7 @@ import {
 import { ActivityIndicator } from '../ui/ActivityIndicator';
 import { PlaybackSpeedControl } from '../ui/PlaybackSpeedControl';
 import { matchSigns, knownPhrases } from './SignLibrary';
+import { SpeechInput, isSpeechSupported } from './SpeechInput';
 import type { VRM } from '@pixiv/three-vrm';
 
 /**
@@ -321,12 +322,35 @@ function setCaption(text: string, glossText: string): void {
 
 let busy = false;
 
-async function run(): Promise<void> {
+/**
+ * Phrases waiting to be signed.
+ *
+ * Typing produces one phrase at a time and can wait for the avatar, but speech
+ * does not: someone talking keeps producing phrases while the previous one is
+ * still being signed. Dropping those (as returning early on `busy` would) loses
+ * words mid-sentence, so they queue and are signed in the order they were said.
+ */
+const queue: string[] = [];
+
+function enqueue(text: string): void {
+  if (text.trim()) queue.push(text);
+  void drain();
+}
+
+async function drain(): Promise<void> {
   if (busy) return;
-  const matches = matchSigns(input.value);
+  while (queue.length) {
+    const next = queue.shift();
+    if (next !== undefined) await run(next);
+  }
+}
+
+async function run(text: string): Promise<void> {
+  if (busy) return;
+  const matches = matchSigns(text);
 
   if (matches.length === 0) {
-    status.textContent = input.value.trim()
+    status.textContent = text.trim()
       ? 'No captured sign for that — try one of the phrases above.'
       : '';
     return;
@@ -334,7 +358,9 @@ async function run(): Promise<void> {
 
   busy = true;
   button.disabled = true;
-  input.disabled = true;
+  // The input stays usable while listening: disabling it would fight the
+  // interim transcript being written into it.
+  input.disabled = !speech?.listening;
   status.textContent = '';
 
   try {
@@ -354,14 +380,56 @@ async function run(): Promise<void> {
     busy = false;
     button.disabled = false;
     input.disabled = false;
-    input.focus();
+    if (!speech?.listening) input.focus();
   }
 }
 
-button.addEventListener('click', () => void run());
+button.addEventListener('click', () => enqueue(input.value));
 input.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') void run();
+  if (e.key === 'Enter') enqueue(input.value);
 });
+
+// --- speech ------------------------------------------------------------------
+// Spoken words go through exactly the same path as typed ones: the transcript
+// is matched against SignLibrary and queued. Nothing about the signing changes,
+// so a phrase the keyboard can sign the microphone can sign too, and one the
+// library does not know fails the same way either way.
+const mic = document.querySelector<HTMLButtonElement>('#mic')!;
+
+const speech = isSpeechSupported()
+  ? new SpeechInput({
+      // Interim text is shown so it is obvious the microphone is working, but
+      // never signed — the recogniser revises it right up until it settles.
+      onInterim: (text) => {
+        input.value = text;
+      },
+      onFinal: (text) => {
+        input.value = text;
+        enqueue(text);
+      },
+      onStateChange: (listening) => {
+        mic.dataset.listening = String(listening);
+        if (listening) {
+          status.textContent = 'Listening…';
+          input.placeholder = 'Speak, or type a sign…';
+        } else {
+          if (status.textContent === 'Listening…') status.textContent = '';
+          input.placeholder = 'Type a sign…';
+        }
+      },
+      onError: (message) => {
+        status.textContent = message;
+      },
+    })
+  : null;
+
+if (speech) {
+  mic.addEventListener('click', () => speech.toggle());
+} else {
+  // Recognition is a browser capability, not something the page can polyfill.
+  mic.disabled = true;
+  mic.title = 'Speech recognition is not available in this browser';
+}
 
 // --- boot ------------------------------------------------------------------
 button.disabled = true;
