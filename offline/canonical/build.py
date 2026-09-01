@@ -39,7 +39,19 @@ from .dba import (
 )
 from .takes import FINGER_TOKENS, Take, alignment_features, load_sign, signal_indices
 
-SIGNS = ("good_evening", "good_night", "thank_you", "pleased")
+SIGNS = (
+    # Greetings_1of2
+    "hello",
+    "how_are_you",
+    "alright",
+    "good_morning",
+    "good_afternoon",
+    # Greetings_2of2
+    "good_evening",
+    "good_night",
+    "thank_you",
+    "pleased",
+)
 GLOSS = {s: s.upper() for s in SIGNS}
 
 
