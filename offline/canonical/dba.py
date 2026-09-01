@@ -21,29 +21,19 @@ from __future__ import annotations
 import numpy as np
 
 
-def _flat(data: np.ndarray, idx: np.ndarray) -> np.ndarray:
-    """(T, J, 3) -> (T, len(idx)*3), the vector DTW compares."""
-    return data[:, idx, :].reshape(data.shape[0], -1)
-
-
-def cost_matrix(a: np.ndarray, b: np.ndarray, idx: np.ndarray) -> np.ndarray:
-    """Pairwise frame distance, (Ta, Tb).
-
-    Euclidean over the stacked signal joints, so a frame differing in one finger
-    costs less than one differing across the whole hand.
-    """
-    A, B = _flat(a, idx), _flat(b, idx)
+def cost_matrix(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """Pairwise frame distance between two (T, D) feature sequences."""
     sq = (A * A).sum(1)[:, None] + (B * B).sum(1)[None, :] - 2.0 * (A @ B.T)
     return np.sqrt(np.maximum(sq, 0.0))
 
 
-def dtw(a: np.ndarray, b: np.ndarray, idx: np.ndarray) -> tuple[float, list[tuple[int, int]]]:
-    """Warped distance and alignment path between two takes.
+def dtw(A: np.ndarray, B: np.ndarray) -> tuple[float, list[tuple[int, int]]]:
+    """Warped distance and alignment path between two feature sequences.
 
     Endpoints are anchored: every take starts at rest and ends at rest, so the
     first and last frames must correspond. The path is returned start-to-end.
     """
-    C = cost_matrix(a, b, idx)
+    C = cost_matrix(A, B)
     n, m = C.shape
     D = np.full((n + 1, m + 1), np.inf)
     D[0, 0] = 0.0
@@ -81,13 +71,13 @@ def resample(data: np.ndarray, n: int) -> np.ndarray:
     return out
 
 
-def distance_matrix(takes: list[np.ndarray], idx: np.ndarray) -> np.ndarray:
-    """Symmetric matrix of pairwise warped distances."""
-    n = len(takes)
+def distance_matrix(feats: list[np.ndarray]) -> np.ndarray:
+    """Symmetric matrix of pairwise warped distances between feature sequences."""
+    n = len(feats)
     D = np.zeros((n, n))
     for i in range(n):
         for j in range(i + 1, n):
-            d, _ = dtw(takes[i], takes[j], idx)
+            d, _ = dtw(feats[i], feats[j])
             D[i, j] = D[j, i] = d
     return D
 
@@ -120,7 +110,7 @@ def _trimmed_mean(stack: np.ndarray, trim: float) -> np.ndarray:
 
 def barycenter(
     takes: list[np.ndarray],
-    idx: np.ndarray,
+    featurize,
     n_frames: int,
     iters: int = 12,
     trim: float = 0.2,
@@ -128,18 +118,24 @@ def barycenter(
 ) -> tuple[np.ndarray, list[float]]:
     """Iteratively align every take to the running mean, then re-average.
 
+    Alignment runs on features (see takes.alignment_features) while averaging
+    runs on the raw joint positions: the warp needs handshape to count for as
+    much as arm travel, but the output must stay in the space the runtime plays.
+
     Returns the canonical sequence and the mean warped distance after each
     iteration, which should decrease monotonically.
     """
-    D = distance_matrix(takes, idx)
+    feats = [featurize(t) for t in takes]
+    D = distance_matrix(feats)
     ref = resample(takes[medoid(D)], n_frames).copy()
 
     history: list[float] = []
     for _ in range(iters):
         groups: list[list[np.ndarray]] = [[] for _ in range(n_frames)]
         total = 0.0
-        for take in takes:
-            d, path = dtw(ref, take, idx)
+        ref_feat = featurize(ref)
+        for take, take_feat in zip(takes, feats):
+            d, path = dtw(ref_feat, take_feat)
             total += d
             for r, t in path:
                 groups[r].append(take[t])
