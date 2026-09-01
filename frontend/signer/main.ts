@@ -87,6 +87,8 @@ let vrm: VRM | null = null;
 let playing: { stream: SkeletonStream; cursor: number } | null = null;
 /** Resolves when the current sign reaches its final frame. */
 let onSignDone: (() => void) | null = null;
+/** Backstop for a render loop that stops running mid-sign. See playSign(). */
+let signWatchdog: ReturnType<typeof setTimeout> | null = null;
 /** Playback multiplier from the speed control (1x-5x). */
 let playbackRate = 1;
 
@@ -107,6 +109,31 @@ async function stream(path: string): Promise<SkeletonStream> {
   }
 }
 
+/**
+ * End the current sign: hold its last pose, drop playback state, resolve the
+ * caller waiting on it.
+ *
+ * Both the render loop and the watchdog finish signs, and whichever gets there
+ * first must leave the same state behind — in particular onSignDone must be
+ * cleared before it is called, so a resolve that starts the next sign cannot
+ * see the finished one still in flight.
+ */
+function finishSign(): void {
+  const current = playing;
+  playing = null;
+  if (signWatchdog !== null) {
+    clearTimeout(signWatchdog);
+    signWatchdog = null;
+  }
+  if (current && vrm) {
+    const frames = current.stream.frames;
+    retargeter.applyPose(vrm, frames[frames.length - 1].joints);
+  }
+  const done = onSignDone;
+  onSignDone = null;
+  done?.();
+}
+
 engine.onUpdate((delta) => {
   if (!vrm) return;
   if (playing) {
@@ -114,10 +141,7 @@ engine.onUpdate((delta) => {
     playing.cursor += delta * s.fps * playbackRate;
     if (playing.cursor >= s.frames.length - 1) {
       playing.cursor = s.frames.length - 1;
-      retargeter.applyPose(vrm, s.frames[s.frames.length - 1].joints);
-      playing = null;
-      onSignDone?.();
-      onSignDone = null;
+      finishSign();
     } else {
       retargeter.applyPose(vrm, s.frames[Math.floor(playing.cursor)].joints);
     }
@@ -132,6 +156,21 @@ function playSign(s: SkeletonStream): Promise<void> {
     retargeter.reset();
     playing = { stream: s, cursor: 0 };
     onSignDone = resolve;
+
+    // The cursor only advances inside requestAnimationFrame, which browsers
+    // stop servicing in a hidden tab. A sign started just before the window is
+    // backgrounded therefore never reaches its last frame, and because run()
+    // awaits this promise the input and button stay disabled for good — every
+    // sign tried afterwards looks like it failed to load, with no error shown.
+    //
+    // setTimeout still fires when hidden (throttled, which is fine here), so it
+    // backstops the loop. The margin is deliberately generous: this must never
+    // pre-empt playback that is merely slow, only a loop that has stopped.
+    if (signWatchdog !== null) clearTimeout(signWatchdog);
+    const expectedMs = (s.frames.length / s.fps / Math.max(playbackRate, 0.1)) * 1000;
+    signWatchdog = setTimeout(() => {
+      if (playing?.stream === s) finishSign();
+    }, expectedMs * 2 + 1500);
   });
 }
 
