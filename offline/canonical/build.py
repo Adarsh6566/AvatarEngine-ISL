@@ -41,6 +41,74 @@ from .takes import FINGER_TOKENS, Take, alignment_features, load_sign, signal_in
 SIGNS = ("good_evening", "good_night", "thank_you", "pleased")
 GLOSS = {s: s.upper() for s in SIGNS}
 
+# Signs whose takes disagree too much to average, with the shape of the correct
+# performance so the right ones can be picked out. See pick_single_take().
+#
+# 'pleased' is fingers together and pointing up, then opening out. Its takes
+# split hard on how far they open — peak fingertip spread runs 0.37 to 0.93, a
+# 2.5x range, at a split score of 0.645 — and averaging them produced a
+# half-open hand that performs neither. Even restricted to the seven takes that
+# do open fully, the barycenter peaked at 0.61 against their median 0.83 and
+# scored 5.8% worse than the best of them: the opening is a brief high-amplitude
+# peak, and averaging peaks that differ in timing erodes them however well the
+# warp is tuned.
+VARIANT_SIGNS: dict[str, dict] = {
+    "pleased": {"side": "r", "open_min": 0.70, "up_min": 0.55},
+}
+
+
+def handshape_curves(data: np.ndarray, joint_names: tuple[str, ...], side: str):
+    """(pointing-up, fingertip-spread) per frame, for one hand.
+
+    up      Y of the middle finger's direction; +1 is straight up.
+    spread  mean fingertip separation over the knuckle span, so it measures
+            opening independently of how big the hand is or how far away.
+    """
+    ix = {n: i for i, n in enumerate(joint_names)}
+    need = [f"{side}Middle1", f"{side}Middle4", f"{side}Hand", f"{side}Index1"]
+    if any(n not in ix for n in need):
+        return np.zeros(len(data)), np.zeros(len(data))
+    m1, m4, hand, k0 = (ix[n] for n in need)
+    tips = [ix[f"{side}{f}4"] for f in ("Index", "Middle", "Ring", "Pinky") if f"{side}{f}4" in ix]
+
+    up = np.zeros(len(data))
+    spread = np.zeros(len(data))
+    for t in range(len(data)):
+        d = data[t, m4] - data[t, m1]
+        n = np.linalg.norm(d)
+        up[t] = d[1] / n if n > 1e-9 else 0.0
+        pts = data[t, tips]
+        pair = [
+            np.linalg.norm(pts[i] - pts[j])
+            for i in range(len(pts))
+            for j in range(i + 1, len(pts))
+        ]
+        scale = np.linalg.norm(data[t, k0] - data[t, hand])
+        spread[t] = (np.mean(pair) / scale) if scale > 1e-6 and pair else 0.0
+    return up, spread
+
+
+def pick_single_take(kept: list[Take], joint_names: tuple[str, ...], spec: dict):
+    """The most representative take that actually performs the sign.
+
+    Two filters, both from the sign's own definition rather than from which
+    takes happen to look best: the hand must open (peak spread >= open_min) and
+    must point up while still closed (before the spread peak). Among those, the
+    medoid — closest to all the others — so the clip that ships is
+    representative rather than merely the most dramatic.
+    """
+    side = spec["side"]
+    correct = []
+    for take in kept:
+        up, spread = handshape_curves(take.data, joint_names, side)
+        peak = int(np.argmax(spread))
+        if spread.max() >= spec["open_min"] and peak > 0 and np.any(up[:peak] >= spec["up_min"]):
+            correct.append(take)
+    if not correct:
+        return None, []
+    feats = [alignment_features(t.data, joint_names) for t in correct]
+    return correct[medoid(distance_matrix(feats))], correct
+
 
 def two_way_split_quality(D: np.ndarray) -> tuple[float, list[int]]:
     """Best 2-medoid split, scored as (between - within) / between.
@@ -141,6 +209,30 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
     split_score, labels = two_way_split_quality(D)
     med_i = medoid(D)
 
+    # A sign whose takes disagree ships a real performance instead of their mean.
+    spec = VARIANT_SIGNS.get(sign)
+    if spec:
+        pick, correct = pick_single_take(kept, joint_names, spec)
+        if pick is not None:
+            write_stream(out_dir / f"{sign}.json", pick.data, joint_names,
+                         {j["name"]: j.get("parent") for j in _meta_of(cache, sign)["joints"]},
+                         pick.fps, sign, [pick], single=pick.name,
+                         candidates=[t.name for t in correct])
+            idx0 = signal_indices(joint_names)
+            rf = [a[:, idx0, :].reshape(len(a), -1) for a in arrays]
+            score = float(np.mean([dtw(pick.data[:, idx0, :].reshape(pick.n_frames, -1), r)[0] for r in rf]))
+            up, spread = handshape_curves(pick.data, joint_names, spec["side"])
+            return {
+                "sign": sign, "mode": "single take", "take": pick.name,
+                "takes_used": len(kept), "candidates": [t.name for t in correct],
+                "takes_rejected": [(t.name, round(t.dropout, 3)) for t in rejected],
+                "frames": pick.n_frames, "fps": pick.fps,
+                "spread_mean": float(off.mean()), "spread_std": float(off.std()),
+                "split_score": split_score, "split_sizes": [labels.count(0), labels.count(1)],
+                "canonical_score": score, "peak_spread": float(spread.max()),
+                "max_up_before_peak": float(up[: int(np.argmax(spread))].max()) if np.argmax(spread) else 0.0,
+            }
+
     raw, history = barycenter(arrays, featurize, n_frames)
 
     parents = {j["name"]: j.get("parent") for j in _meta_of(cache, sign)["joints"]}
@@ -216,6 +308,8 @@ def write_stream(
     fps: float,
     sign: str,
     sources: list[Take],
+    single: str | None = None,
+    candidates: list[str] | None = None,
 ) -> None:
     n = data.shape[0]
     payload = {
@@ -226,13 +320,16 @@ def write_stream(
             "frameCount": n,
             "duration": round(n / fps, 4),
             "joints": [{"name": nm, "parent": parents.get(nm)} for nm in joint_names],
-            "source_video": f"canonical of {len(sources)} takes",
-            "estimator": "mediapipe tasks pose+hand (lite) + smoothed + DTW barycenter",
+            "source_video": f"{single}.MOV" if single else f"canonical of {len(sources)} takes",
+            "estimator": "mediapipe tasks pose+hand (lite) + smoothed"
+            + ("" if single else " + DTW barycenter"),
             "gloss": GLOSS[sign],
             "coordinate_space": "world (Y down, meters, cheap-3D)",
             "canonical": {
-                "method": "DTW barycenter averaging, trimmed mean, bone-length enforced",
-                "takes": [t.name for t in sources],
+                "method": "single take, medoid of those performing the sign"
+                if single
+                else "DTW barycenter averaging, trimmed mean, bone-length enforced",
+                "takes": candidates if single else [t.name for t in sources],
             },
         },
         "frames": [
@@ -268,6 +365,13 @@ def main() -> None:
         reports.append(r)
         if "error" in r:
             print(f"  SKIPPED: {r['error']}")
+            continue
+        if r.get("mode") == "single take":
+            print(f"  MODE               single take (takes disagree; split {r['split_score']:.3f})")
+            print(f"  chosen             {r['take']}  from {len(r['candidates'])} performing it correctly")
+            print(f"  frames             {r['frames']} @ {r['fps']:.0f}fps")
+            print(f"  peak spread        {r['peak_spread']:.2f}   points up first {r['max_up_before_peak']:+.2f}")
+            print(f"  score              {r['canonical_score']:.4f}")
             continue
         print(f"  takes used         {r['takes_used']}  (rejected {len(r['takes_rejected'])})")
         for name, drop in r["takes_rejected"]:
