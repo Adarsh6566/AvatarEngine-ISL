@@ -68,6 +68,31 @@
         transition: opacity 0.2s var(--ease);
       }
       #sign:disabled { opacity: 0.45; cursor: default; }
+
+      /* Microphone: quiet until it is listening, then it pulses so there is no
+         doubt the mic is live — the one state a user must never be unsure of. */
+      #mic {
+        display: flex; align-items: center; justify-content: center;
+        width: 40px; height: 40px; flex: 0 0 auto;
+        border: 1px solid rgba(22, 19, 15, 0.12);
+        border-radius: 999px; cursor: pointer;
+        background: transparent; color: rgba(22, 19, 15, 0.55);
+        transition: background 0.18s var(--ease), color 0.18s var(--ease),
+                    border-color 0.18s var(--ease);
+      }
+      #mic:hover { background: rgba(22, 19, 15, 0.05); color: var(--ink); }
+      #mic[data-listening='true'] {
+        background: var(--accent); border-color: var(--accent); color: #fff;
+        animation: mic-pulse 1.6s ease-in-out infinite;
+      }
+      #mic:disabled { opacity: 0.35; cursor: default; }
+      @keyframes mic-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(180, 68, 58, 0.45); }
+        50%      { box-shadow: 0 0 0 7px rgba(180, 68, 58, 0); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #mic[data-listening='true'] { animation: none; }
+      }
       .bar__hint {
         text-align: center; margin-top: 10px;
         font-size: 12.5px; color: rgba(22, 19, 15, 0.5);
@@ -145,6 +170,14 @@
     <div class="bar">
       <div class="bar__row">
         <input id="text" type="text" placeholder="Type a sign…" autocomplete="off" spellcheck="false" />
+        <button id="mic" type="button" title="Sign what you say" aria-label="Sign what you say">
+          <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+            <path
+              d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z M19 11a7 7 0 0 1-14 0 M12 18v3"
+              fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
         <button id="sign" type="button">Sign</button>
       </div>
       <div class="bar__hint">
