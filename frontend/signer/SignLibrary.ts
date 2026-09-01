@@ -17,7 +17,7 @@ export interface SignEntry {
 }
 
 export const SIGN_LIBRARY: readonly SignEntry[] = [
-  { gloss: 'HELLO',          path: '/skeleton/hello_captured.json',          words: ['hello', 'hi', 'hey'] },
+  { gloss: 'HELLO',          path: '/skeleton/hello.json',           words: ['hello', 'hi', 'hey'] },
   { gloss: 'ALRIGHT',        path: '/skeleton/alright.json',        words: ['alright', 'okay', 'ok'] },
   { gloss: 'GOOD_MORNING',   path: '/skeleton/good_morning.json',   words: ['good morning', 'morning'] },
   { gloss: 'GOOD_AFTERNOON', path: '/skeleton/good_afternoon.json', words: ['good afternoon', 'afternoon'] },
