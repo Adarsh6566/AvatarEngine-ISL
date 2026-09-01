@@ -28,6 +28,7 @@ import numpy as np
 
 from .dba import (
     barycenter,
+    despike,
     distance_matrix,
     dtw,
     enforce_bone_lengths,
@@ -73,12 +74,51 @@ def two_way_split_quality(D: np.ndarray) -> tuple[float, list[int]]:
 SIGMA_LADDER = (0.0, 0.4, 0.6, 0.8, 1.0, 1.4, 2.0)
 
 
+ARM_STAT_JOINTS = ("lElbow", "lWrist", "lHand", "rElbow", "rWrist", "rHand")
+
+
+def _group_indices(joint_names: tuple[str, ...]) -> dict[str, list[int]]:
+    """The joint groups jitter is judged on: the fingers, and the arm carrying them."""
+    return {
+        "fingers": [i for i, n in enumerate(joint_names) if any(t in n for t in FINGER_TOKENS)],
+        "arm": [i for i, n in enumerate(joint_names) if n in ARM_STAT_JOINTS],
+    }
+
+
+def _motion_stats(
+    data: np.ndarray, joint_names: tuple[str, ...]
+) -> tuple[dict[str, dict[str, float]], float]:
+    """(per-group step statistics, mean finger range of motion).
+
+    Each group reports both the MEDIAN step and the 95th percentile, because
+    they describe different faults and only the second is what gets complained
+    about. The median is the general noise level; p95 is the fast lurch — the
+    handful of frames that move several times as far as the rest, which read as
+    sudden wrong motion and can carry a hand into the body before the next
+    frame pulls it back.
+
+    Both groups are measured, fingers and the arm carrying them, since a calm
+    hand on a lurching wrist still looks wrong.
+    """
+    groups = _group_indices(joint_names)
+    steps: dict[str, dict[str, float]] = {}
+    for name, idx in groups.items():
+        if not idx:
+            continue
+        step = np.linalg.norm(np.diff(data[:, idx, :], axis=0), axis=2).mean(axis=1)
+        steps[name] = {
+            "median": float(np.median(step)),
+            "p95": float(np.percentile(step, 95)),
+        }
+    f = groups["fingers"]
+    rng = float(np.mean(data[:, f, :].max(axis=0) - data[:, f, :].min(axis=0))) if f else 0.0
+    return steps, rng
+
+
 def _finger_stats(data: np.ndarray, joint_names: tuple[str, ...]) -> tuple[float, float]:
     """(median per-frame finger movement, mean finger range of motion)."""
-    f = [i for i, n in enumerate(joint_names) if any(t in n for t in FINGER_TOKENS)]
-    step = np.linalg.norm(np.diff(data[:, f, :], axis=0), axis=2).mean(axis=1)
-    rng = float(np.mean(data[:, f, :].max(axis=0) - data[:, f, :].min(axis=0)))
-    return float(np.median(step)), rng
+    steps, rng = _motion_stats(data, joint_names)
+    return steps.get("fingers", {}).get("median", 0.0), rng
 
 
 def choose_sigma(
@@ -94,15 +134,35 @@ def choose_sigma(
     jitter only has to reach parity with a typical take, not be minimised. The
     ladder is walked from no smoothing upward and the first width that reaches
     parity wins, which is also the one that keeps the most range.
+
+    Parity is required on the ARM as well as the fingers. Requiring it of the
+    fingers alone left the arms unmeasured, and they were the worse offender:
+    the published clips carried wrist steps up to 7.6x their own median, which
+    reads as a fast wrong motion and can drive the hand into the body for a
+    frame. The arm is also the cheaper one to smooth — it has none of the
+    handshape detail that smoothing costs.
     """
-    target = float(np.median([_finger_stats(a, joint_names)[0] for a in arrays]))
+    per_take = [_motion_stats(a, joint_names)[0] for a in arrays]
+    # Parity is judged against the takes on BOTH statistics of BOTH groups. p95
+    # is the one that matters for the lurches; median alone was satisfied by
+    # clips that still jumped, and worse, lowering the median (as despiking
+    # does) then let this pick LESS smoothing and leave the jumps bigger.
+    targets = {
+        (g, stat): float(np.median([s[g][stat] for s in per_take if g in s]))
+        for g in ("fingers", "arm")
+        for stat in ("median", "p95")
+        if any(g in s for s in per_take)
+    }
     trace: list[tuple[float, float, float]] = []
     chosen = SIGMA_LADDER[-1]
     for s in SIGMA_LADDER:
-        cand = enforce_bone_lengths(temporal_smooth(raw, s), joint_names, parents, lengths)
-        jit, rng = _finger_stats(cand, joint_names)
-        trace.append((s, jit, rng))
-        if jit <= target and chosen == SIGMA_LADDER[-1]:
+        cand = enforce_bone_lengths(temporal_smooth(despike(raw), s), joint_names, parents, lengths)
+        steps, rng = _motion_stats(cand, joint_names)
+        trace.append((s, steps.get("fingers", {}).get("median", 0.0), rng))
+        met = all(
+            steps.get(g, {}).get(stat, 0.0) <= target for (g, stat), target in targets.items()
+        )
+        if met and chosen == SIGMA_LADDER[-1]:
             chosen = s
             break
     return chosen, trace
@@ -156,7 +216,7 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
     # skeleton rigid. Smoothing after the bone fix would reintroduce length
     # error by averaging neighbouring positions again.
     canonical = enforce_bone_lengths(
-        temporal_smooth(raw, used_sigma), joint_names, parents, lengths
+        temporal_smooth(despike(raw), used_sigma), joint_names, parents, lengths
     )
     canon_jitter, canon_range = _finger_stats(canonical, joint_names)
     take_jitter, take_range = (

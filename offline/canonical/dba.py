@@ -153,6 +153,35 @@ def barycenter(
     return ref, history
 
 
+def despike(data: np.ndarray, window: int = 3) -> np.ndarray:
+    """Replace isolated single-frame outliers with the local median.
+
+    The barycenter's worst artefact is not its overall noise level, which
+    already matches the takes, but a handful of frames that jump many times the
+    median step — measured up to 7.6x on a wrist. Those read as a fast wrong
+    motion, and a hand thrown that far in one frame can pass through the body.
+
+    A Gaussian cannot fix this: it spreads an impulse across its neighbours
+    instead of removing it, which is why widening sigma did not help. A running
+    median discards the impulse outright while leaving genuine fast movement
+    intact, since real motion is corroborated by the frames on either side.
+
+    Runs before the Gaussian: impulses first, then the residual roughness.
+    """
+    n = data.shape[0]
+    if window < 3 or n < window:
+        return data
+    half = window // 2
+    padded = np.pad(data, ((half, half), (0, 0), (0, 0)), mode="edge")
+    out = np.empty_like(data)
+    for t in range(n):
+        out[t] = np.median(padded[t : t + window], axis=0)
+    # The first and last frames hold the rest pose that playback starts and ends
+    # on; edge padding already protects them, but keep them exact.
+    out[0], out[-1] = data[0], data[-1]
+    return out
+
+
 def temporal_smooth(data: np.ndarray, sigma: float = 1.0) -> np.ndarray:
     """Damp the frame-to-frame roughness DBA introduces.
 

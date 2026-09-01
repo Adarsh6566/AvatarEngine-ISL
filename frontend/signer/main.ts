@@ -3,7 +3,13 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RenderEngine } from '../core/RenderEngine';
 import { VrmLoader } from '../avatar/loading/VrmLoader';
 import { SkeletonRetargeter } from '../avatar/animation/SkeletonRetargeter';
-import { loadSkeletonStream, toViewSpace, type SkeletonStream } from '../skeleton/SkeletonStream';
+import {
+  loadSkeletonStream,
+  toViewSpace,
+  type SkeletonJointValue,
+  type SkeletonStream,
+  type SkeletonStreamFrame,
+} from '../skeleton/SkeletonStream';
 import { ActivityIndicator } from '../ui/ActivityIndicator';
 import { PlaybackSpeedControl } from '../ui/PlaybackSpeedControl';
 import { matchSigns, knownPhrases } from './SignLibrary';
@@ -134,6 +140,37 @@ function finishSign(): void {
   done?.();
 }
 
+/**
+ * Joints midway between two frames, at t in [0,1].
+ *
+ * Clips are 25fps and the display runs at 60, so playing the nearest frame
+ * holds each pose for two or three refreshes and then jumps. On slow movement
+ * that is invisible; on the fast reaches that signing is full of — measured up
+ * to 0.126 view units between adjacent frames — it reads as a lurch, and the
+ * hand crosses a lot of ground in one step, which is when it clips the body.
+ *
+ * The captured samples are unchanged; this only fills the gaps between them, so
+ * the avatar travels the same path with the same timing, continuously.
+ */
+type Joints = SkeletonStreamFrame['joints'];
+
+function lerpJoints(a: Joints, b: Joints, t: number): Joints {
+  const out: Record<string, SkeletonJointValue> = {};
+  for (const name of Object.keys(a)) {
+    const p = a[name];
+    const q = b[name];
+    // A joint missing from either frame is carried through unchanged rather
+    // than interpolated toward nothing.
+    out[name] = p && q ? [
+      p[0] + (q[0] - p[0]) * t,
+      p[1] + (q[1] - p[1]) * t,
+      p[2] + (q[2] - p[2]) * t,
+      p[3] + (q[3] - p[3]) * t,
+    ] : p;
+  }
+  return out;
+}
+
 engine.onUpdate((delta) => {
   if (!vrm) return;
   if (playing) {
@@ -143,7 +180,13 @@ engine.onUpdate((delta) => {
       playing.cursor = s.frames.length - 1;
       finishSign();
     } else {
-      retargeter.applyPose(vrm, s.frames[Math.floor(playing.cursor)].joints);
+      const i = Math.floor(playing.cursor);
+      const t = playing.cursor - i;
+      const joints =
+        t < 1e-4
+          ? s.frames[i].joints
+          : lerpJoints(s.frames[i].joints, s.frames[i + 1].joints, t);
+      retargeter.applyPose(vrm, joints);
     }
   }
   vrm.update(delta);
