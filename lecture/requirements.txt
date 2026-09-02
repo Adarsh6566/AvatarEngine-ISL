@@ -1,0 +1,29 @@
+# lecture/requirements.txt — isolated, does not touch root requirements.txt
+# Install: pip install -r lecture/requirements.txt
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.9
+opencv-python>=4.8
+numpy>=1.24
+
+# Speech to timed text, run locally. Pulls av (PyAV), which decodes the video's
+# audio directly, so no ffmpeg binary is needed for transcription itself.
+faster-whisper>=1.2
+
+# Fetching a lecture by URL.
+yt-dlp>=2025.1.1
+
+# ffmpeg as a wheel, for yt-dlp only.
+#
+# Sites now serve video and audio as separate streams that must be spliced back
+# together, and yt-dlp cannot do that without ffmpeg — YouTube in particular has
+# all but stopped offering the combined formats that need no splicing, so
+# without this a fetch fails with "Requested format is not available".
+#
+# A system ffmpeg on PATH is used in preference; this is the fallback so the
+# pipeline works from pip alone.
+imageio-ffmpeg>=0.5
+
+# Finding the speaker in frame reuses the pose model from pipeline/, so
+# ultralytics comes from pipeline/requirements.txt rather than being pinned
+# twice.
