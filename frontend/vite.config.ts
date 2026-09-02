@@ -102,6 +102,7 @@ export default defineConfig({
         main: 'index.html',
         'skeleton-viewer': 'skeleton-viewer.html',
         signer: 'signer.html',
+        lecture: 'lecture.html',
       },
       output: {
         manualChunks(id) {
