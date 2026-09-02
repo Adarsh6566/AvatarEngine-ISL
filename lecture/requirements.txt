@@ -27,3 +27,36 @@ imageio-ffmpeg>=0.5
 # Finding the speaker in frame reuses the pose model from pipeline/, so
 # ultralytics comes from pipeline/requirements.txt rather than being pinned
 # twice.
+
+# --- GPU (optional) ----------------------------------------------------------
+# Everything above runs on CPU. These are only for a CUDA machine, and they are
+# large — roughly 3.7GB all told — so they are not installed by default.
+#
+# Measured on an RTX 5070 against 72.7s of lecture audio, warm (the server loads
+# the model once and serves many requests, so the warm figure is the one that
+# matters):
+#
+#   base model    CPU int8 3.1s   ->  GPU fp16 1.0s   3.1x
+#   small model   CPU int8 9.5s   ->  GPU fp16 1.6s   5.9x
+#
+# A single short clip in a cold process can still be SLOWER on GPU: CUDA context
+# setup costs a few seconds and swamps a 1s transcription. The win is in the
+# server, and it grows with audio length and model size.
+#
+# Two separate CUDA stacks are involved, and they need not agree:
+#
+#   torch      speaker detection (YOLO). Any recent CUDA build works; pick the
+#              one matching your driver, e.g. cu132 for a CUDA 13.2 driver:
+#                pip install --index-url https://download.pytorch.org/whl/cu132 \
+#                    torch==2.13.0+cu132 torchvision==0.28.0+cu132
+#
+#   ctranslate2  Whisper. Built against CUDA 12 and cuDNN 9 REGARDLESS of the
+#              torch build, so a CUDA 13 torch leaves it unable to load cublas
+#              while torch reports a perfectly working GPU. Hence these:
+#
+# pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+#
+# On Windows those wheels land in site-packages/nvidia/*/bin, which is on no
+# search path; transcribe.register_cuda_dlls() puts them on PATH before
+# ctranslate2 loads. Without a GPU, or with any of this missing, transcription
+# falls back to CPU and says so rather than failing.
