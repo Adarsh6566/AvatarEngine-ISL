@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>avatar-engine — lecture signer</title>
+    <style>
+      :root {
+        --paper: #f2efe9;
+        --ink: #16130f;
+        --accent: #b4443a;
+        --line: rgba(22, 19, 15, 0.12);
+        --muted: rgba(22, 19, 15, 0.55);
+        --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+        color-scheme: light;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--paper); color: var(--ink);
+        font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      canvas { display: block; }
+
+      .page {
+        display: grid; grid-template-rows: auto 1fr auto;
+        height: 100vh; gap: 0;
+      }
+
+      header {
+        display: flex; align-items: center; gap: 14px;
+        padding: 12px 18px; border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--muted); margin-right: auto;
+      }
+      button {
+        font: inherit; border-radius: 999px; cursor: pointer;
+        border: 1px solid var(--line); background: #fff; color: var(--ink);
+        padding: 8px 16px; transition: background 0.18s var(--ease);
+      }
+      button:hover:not(:disabled) { background: rgba(22, 19, 15, 0.05); }
+      button:disabled { opacity: 0.45; cursor: default; }
+      button.primary {
+        background: var(--accent); border-color: var(--accent); color: #fff;
+      }
+      button.primary:hover:not(:disabled) { background: #9d3b32; }
+
+      /* Video and avatar side by side: the lecturer speaking, and the signing
+         of what they said, so the two can be compared at a glance. */
+      .stage {
+        display: grid; grid-template-columns: 1fr 1fr;
+        min-height: 0; border-bottom: 1px solid var(--line);
+      }
+      .pane { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+      .pane + .pane { border-left: 1px solid var(--line); }
+      .pane__label {
+        position: absolute; top: 10px; left: 12px; z-index: 5;
+        font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--muted); pointer-events: none;
+      }
+      #video { width: 100%; height: 100%; object-fit: contain; background: #0d0b09; }
+      #avatar { position: absolute; inset: 0; }
+
+      .caption {
+        position: absolute; left: 0; right: 0; bottom: 14px;
+        display: flex; justify-content: center; z-index: 6; pointer-events: none;
+        opacity: 0; transition: opacity 0.25s var(--ease);
+      }
+      .caption[data-state='active'] { opacity: 1; }
+      .caption__box {
+        background: var(--accent); color: #fff;
+        border-radius: 12px; padding: 8px 20px 7px; text-align: center;
+        box-shadow: 0 8px 24px rgba(22, 19, 15, 0.16);
+      }
+      .caption__word { font-size: 24px; font-weight: 700; }
+      .caption__gloss {
+        font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+        opacity: 0.75;
+      }
+
+      /* Transcript doubles as the coverage report: every segment is shown, and
+         the ones with no sign are visibly the majority. That gap is the honest
+         state of the system and should not be hidden. */
+      .foot {
+        display: grid; grid-template-columns: 260px 1fr;
+        height: 210px; min-height: 0;
+      }
+      .side {
+        border-right: 1px solid var(--line); padding: 12px 14px;
+        overflow: auto; font-size: 13px;
+      }
+      .side h2 {
+        margin: 0 0 8px; font-size: 10px; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--muted); font-weight: 600;
+      }
+      .side dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; }
+      .side dt { color: var(--muted); }
+      .side dd { margin: 0; }
+      #lecturer {
+        margin-top: 10px; width: 100%; border-radius: 8px;
+        border: 1px solid var(--line); display: none;
+      }
+
+      .transcript { overflow: auto; padding: 6px 0; }
+      .seg {
+        display: grid; grid-template-columns: 92px 1fr auto;
+        gap: 12px; align-items: baseline;
+        padding: 6px 16px; border-left: 3px solid transparent;
+      }
+      .seg[data-active='true'] {
+        background: rgba(180, 68, 58, 0.07); border-left-color: var(--accent);
+      }
+      .seg__time {
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--muted);
+      }
+      .seg__text { min-width: 0; }
+      .seg__signs { font-size: 11px; letter-spacing: 0.06em; white-space: nowrap; }
+      .seg__signs b { color: var(--accent); font-weight: 600; }
+      .seg__signs i { color: rgba(22, 19, 15, 0.3); font-style: normal; }
+
+      #status { color: var(--accent); min-height: 18px; font-size: 13px; }
+      .hint { color: var(--muted); font-size: 12.5px; }
+
+      @media (max-width: 900px) {
+        .stage { grid-template-columns: 1fr; }
+        .pane + .pane { border-left: 0; border-top: 1px solid var(--line); }
+        .foot { grid-template-columns: 1fr; height: 260px; }
+        .side { border-right: 0; border-bottom: 1px solid var(--line); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <span class="brand">lecture → sign</span>
+        <span id="status"></span>
+        <input id="file" type="file" accept="video/*" style="display: none" />
+        <button id="choose" type="button">Choose video…</button>
+        <button id="transcribe" class="primary" type="button" disabled>Transcribe</button>
+      </header>
+
+      <div class="stage">
+        <div class="pane">
+          <span class="pane__label">lecturer</span>
+          <video id="video" controls playsinline></video>
+        </div>
+        <div class="pane">
+          <span class="pane__label">signing</span>
+          <div id="avatar"></div>
+          <div class="caption">
+            <div class="caption__box">
+              <div class="caption__word" id="caption"></div>
+              <div class="caption__gloss" id="gloss"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="foot">
+        <aside class="side">
+          <h2>Run</h2>
+          <dl>
+            <dt>file</dt><dd id="m-file">–</dd>
+            <dt>language</dt><dd id="m-lang">–</dd>
+            <dt>duration</dt><dd id="m-dur">–</dd>
+            <dt>segments</dt><dd id="m-segs">–</dd>
+            <dt>signable</dt><dd id="m-cov">–</dd>
+            <dt>model</dt><dd id="m-model">–</dd>
+          </dl>
+          <img id="lecturer" alt="Still of the lecturer detected in the video" />
+          <p class="hint" id="m-note"></p>
+        </aside>
+        <div class="transcript" id="transcript">
+          <p class="hint" style="padding: 8px 16px">
+            Choose a video and transcribe it. The avatar signs each phrase as the
+            lecturer reaches it.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/lecture/main.ts"></script>
+  </body>
+</html>
