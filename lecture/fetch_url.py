@@ -118,6 +118,24 @@ def fetch(url: str, dest_dir: Path, max_height: int = 720, max_duration: float =
         # yt-dlp looks for ffmpeg on PATH; the wheel's copy is not there.
         options["ffmpeg_location"] = ffmpeg
 
+    # Long downloads get their connection dropped partway
+    # (ConnectionResetError 10054) often enough that a single attempt is not
+    # dependable — the same URL that fails will usually succeed on a retry.
+    #
+    # http_chunk_size is what actually helps: it splits the download into
+    # separate ranged requests, so a reset costs one chunk rather than the whole
+    # file, and the retry resumes instead of starting over.
+    options.update(
+        {
+            "retries": 5,
+            "fragment_retries": 5,
+            "file_access_retries": 3,
+            "socket_timeout": 30,
+            "http_chunk_size": 5 * 1024 * 1024,
+            "continuedl": True,
+        }
+    )
+
     with YoutubeDL(options) as ydl:
         try:
             # Probe first so an over-long video is refused before it is fetched,
