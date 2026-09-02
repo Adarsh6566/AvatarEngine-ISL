@@ -34,6 +34,32 @@ class LecturerShot:
     image: np.ndarray  # cropped BGR
 
 
+def select_device() -> str:
+    """"cuda:N" when torch has a GPU, else "cpu"; PIPELINE_DEVICE overrides.
+
+    Deliberately a local copy of pipeline/extractor/device.py rather than an
+    import of it. lecture/ is self-contained by design, and this is a few lines
+    of environment probing with no state to keep in step — unlike the sign
+    vocabulary, where a second copy would be a second thing to get wrong.
+
+    Ultralytics resolves an unspecified device to CPU, so without passing this
+    explicitly the detection stays on CPU even on a machine with a working GPU.
+    """
+    import os
+
+    override = os.environ.get("PIPELINE_DEVICE", "").strip()
+    if override:
+        return override
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "cuda:0"
+    except Exception:
+        pass
+    return "cpu"
+
+
 def _yolo():
     """Pose model, reused from the extraction pipeline so there is one download."""
     from ultralytics import YOLO  # type: ignore
@@ -74,6 +100,7 @@ def find_lecturer(
         return None
 
     model = _yolo()
+    device = select_device()
     best: LecturerShot | None = None
 
     # Skip the very start and end, which are title and summary cards more often
@@ -85,7 +112,7 @@ def find_lecturer(
         if not ok:
             continue
 
-        result = model(frame, verbose=False)[0]
+        result = model(frame, verbose=False, device=device)[0]
         if result.boxes is None or len(result.boxes) == 0:
             continue
 
