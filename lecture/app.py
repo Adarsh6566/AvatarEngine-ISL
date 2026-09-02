@@ -146,10 +146,23 @@ async def api_transcribe_url(
         result = _analyse(fetched.path, run_id, model, language, lecturer)
         result["original"] = fetched.title
         result["source"] = fetched.to_dict()
+
+        # The fetched file is KEPT and served back, which the page needs rather
+        # than merely likes: signing is driven by the video element's
+        # currentTime, and a page URL cannot be played by one. Without a real
+        # media file there is a transcript but nothing to sign along to.
+        media = OUTPUT_DIR / f"{run_id}{fetched.path.suffix}"
+        try:
+            shutil.move(str(fetched.path), str(media))
+            result["media"] = {"url": f"/api/outputs/{media.name}"}
+        except Exception as e:
+            result["media_error"] = f"{type(e).__name__}: {e}"
+
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": f"{type(e).__name__}: {e}"})
     finally:
+        # Only if it was not moved into outputs above.
         try:
             fetched.path.unlink(missing_ok=True)
         except Exception:
