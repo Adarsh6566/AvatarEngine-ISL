@@ -35,29 +35,30 @@ class LecturerShot:
 
 
 def select_device() -> str:
-    """"cuda:N" when torch has a GPU, else "cpu"; PIPELINE_DEVICE overrides.
+    """CPU by default, even where a GPU is present. PIPELINE_DEVICE overrides.
 
-    Deliberately a local copy of pipeline/extractor/device.py rather than an
-    import of it. lecture/ is self-contained by design, and this is a few lines
-    of environment probing with no state to keep in step — unlike the sign
-    vocabulary, where a second copy would be a second thing to get wrong.
+    This looks like leaving performance on the table and is not. Whisper reaches
+    the GPU through CTranslate2, which needs cuDNN 9 from the CUDA 12 wheels;
+    torch brings its own cuDNN. Running both on the GPU in ONE process puts two
+    cuDNN versions in play, and the second one to initialise fails:
 
-    Ultralytics resolves an unspecified device to CPU, so without passing this
-    explicitly the detection stays on CPU even on a machine with a working GPU.
+        CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH
+
+    In the server that is exactly what happens — Whisper transcribes, then this
+    runs — and the detection fails while the transcript succeeds, so the request
+    returns 200 with the lecturer quietly missing. Measured on a real request:
+    the still was never written, and the page reported "no lecturer found" on a
+    video whose lecturer is plainly there.
+
+    The trade is small either way. This scans twelve frames: 4.8s on CPU against
+    3.0s on GPU, once per lecture. Whisper is where the GPU earns its place, and
+    it keeps it. Set PIPELINE_DEVICE=cuda:0 to try the GPU in a process that
+    does not also transcribe.
     """
     import os
 
     override = os.environ.get("PIPELINE_DEVICE", "").strip()
-    if override:
-        return override
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            return "cuda:0"
-    except Exception:
-        pass
-    return "cpu"
+    return override or "cpu"
 
 
 def _yolo():
