@@ -47,6 +47,23 @@
       }
       button.primary:hover:not(:disabled) { background: #9d3b32; }
 
+      #url {
+        font: inherit; font-size: 13px; width: 260px;
+        padding: 8px 14px; border-radius: 999px;
+        border: 1px solid var(--line); background: #fff; color: var(--ink);
+      }
+      #url:focus { outline: 2px solid rgba(180, 68, 58, 0.35); outline-offset: -1px; }
+
+      /* Licence of a fetched video. Shown because this pipeline reuses a
+         person's likeness, so the terms it arrived under are worth reading. */
+      #source {
+        margin-top: 10px; padding: 8px 10px; font-size: 12px; line-height: 1.45;
+        border: 1px solid var(--line); border-radius: 8px;
+        background: rgba(22, 19, 15, 0.03); display: none;
+      }
+      #source a { color: var(--accent); }
+      #source .lic { font-weight: 600; }
+
       /* Video and avatar side by side: the lecturer speaking, and the signing
          of what they said, so the two can be compared at a glance. */
       .stage {
@@ -138,6 +155,8 @@
         <span class="brand">lecture → sign</span>
         <span id="status"></span>
         <input id="file" type="file" accept="video/*" style="display: none" />
+        <input id="url" type="url" placeholder="…or paste a video URL" spellcheck="false" />
+        <button id="fetch" type="button">Fetch</button>
         <button id="choose" type="button">Choose video…</button>
         <button id="transcribe" class="primary" type="button" disabled>Transcribe</button>
       </header>
@@ -171,6 +190,7 @@
             <dt>model</dt><dd id="m-model">–</dd>
           </dl>
           <img id="lecturer" alt="Still of the lecturer detected in the video" />
+          <div id="source"></div>
           <p class="hint" id="m-note"></p>
         </aside>
         <div class="transcript" id="transcript">
