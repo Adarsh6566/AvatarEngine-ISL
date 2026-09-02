@@ -340,10 +340,17 @@ fetchBtn.addEventListener('click', async () => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail ?? response.status);
 
-    // The fetched file lives on the server, so the page streams it from the
-    // original URL for playback. If that will not embed, the transcript and the
-    // signing still work; only the left pane stays empty.
-    video.src = data.source?.webpage_url ?? '';
+    // Play the file the server fetched, NOT the page it came from: a watch-page
+    // URL cannot be played by a video element, and signing is driven by this
+    // element's currentTime — without real media nothing would fire.
+    if (data.media?.url) {
+      video.src = `${API}${data.media.url}`;
+    } else {
+      video.removeAttribute('src');
+      video.load();
+      statusEl.textContent =
+        'Transcribed, but the video could not be served back — signs will not play along.';
+    }
     meta.file.textContent = data.original ?? url;
     chosen = null;
     applyTranscript(data);
