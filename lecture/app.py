@@ -24,9 +24,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 try:
+    from .fetch_url import FetchError, fetch
     from .lecturer import find_lecturer
     from .transcribe import DEFAULT_MODEL, pick_device, transcribe
 except ImportError:  # running as a script rather than a package
+    from fetch_url import FetchError, fetch  # type: ignore
     from lecturer import find_lecturer  # type: ignore
     from transcribe import DEFAULT_MODEL, pick_device, transcribe  # type: ignore
 
@@ -83,32 +85,73 @@ async def api_transcribe(
     tmp = _save_upload(file)
     run_id = f"{Path(file.filename or 'lecture').stem}_{uuid.uuid4().hex[:6]}"
     try:
-        result = transcribe(tmp, model_size=model, language=language).to_dict()
-        result["run_id"] = run_id
+        result = _analyse(tmp, run_id, model, language, lecturer)
         result["original"] = file.filename
-
-        if lecturer:
-            try:
-                shot = find_lecturer(tmp)
-            except Exception as e:  # a missing still must not lose the transcript
-                shot = None
-                result["lecturer_error"] = f"{type(e).__name__}: {e}"
-            if shot is not None:
-                name = f"{run_id}_lecturer.jpg"
-                cv2.imwrite(str(OUTPUT_DIR / name), shot.image)
-                result["lecturer"] = {
-                    "url": f"/api/outputs/{name}",
-                    "timestamp": round(shot.timestamp, 2),
-                    "confidence": round(shot.confidence, 3),
-                    "box": list(shot.box),
-                }
-
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": f"{type(e).__name__}: {e}"})
     finally:
         try:
             tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _analyse(path: Path, run_id: str, model: str, language: str | None, lecturer: bool) -> dict:
+    """Transcribe, and cut out the speaker. Shared by the upload and URL routes."""
+    result = transcribe(path, model_size=model, language=language).to_dict()
+    result["run_id"] = run_id
+
+    if lecturer:
+        try:
+            shot = find_lecturer(path)
+        except Exception as e:  # a missing still must not lose the transcript
+            shot = None
+            result["lecturer_error"] = f"{type(e).__name__}: {e}"
+        if shot is not None:
+            name = f"{run_id}_lecturer.jpg"
+            cv2.imwrite(str(OUTPUT_DIR / name), shot.image)
+            result["lecturer"] = {
+                "url": f"/api/outputs/{name}",
+                "timestamp": round(shot.timestamp, 2),
+                "confidence": round(shot.confidence, 3),
+                "box": list(shot.box),
+            }
+    return result
+
+
+@app.post("/api/transcribe-url")
+async def api_transcribe_url(
+    url: str = Query(..., description="page URL of a single video"),
+    model: str = Query(DEFAULT_MODEL),
+    language: str | None = Query(None),
+    lecturer: bool = Query(True),
+) -> JSONResponse:
+    """Fetch a video by URL, then analyse it exactly as an upload.
+
+    The source's own metadata comes back with the result — who published it and
+    under what licence. This pipeline exists to reuse a person's likeness, so
+    that is part of the answer, not a footnote to it.
+    """
+    fetched = None
+    try:
+        fetched = fetch(url, TMP_DIR)
+    except FetchError as e:
+        return JSONResponse(status_code=400, content={"detail": str(e)})
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"detail": f"{type(e).__name__}: {e}"})
+
+    run_id = f"{fetched.path.stem}_{uuid.uuid4().hex[:6]}"
+    try:
+        result = _analyse(fetched.path, run_id, model, language, lecturer)
+        result["original"] = fetched.title
+        result["source"] = fetched.to_dict()
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": f"{type(e).__name__}: {e}"})
+    finally:
+        try:
+            fetched.path.unlink(missing_ok=True)
         except Exception:
             pass
 

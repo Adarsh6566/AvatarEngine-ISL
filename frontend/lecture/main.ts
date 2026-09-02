@@ -42,6 +42,9 @@ const captionEl = el<HTMLDivElement>('caption');
 const glossEl = el<HTMLDivElement>('gloss');
 const captionRoot = captionEl.closest<HTMLDivElement>('.caption')!;
 const lecturerImg = el<HTMLImageElement>('lecturer');
+const urlInput = el<HTMLInputElement>('url');
+const fetchBtn = el<HTMLButtonElement>('fetch');
+const sourceEl = el<HTMLDivElement>('source');
 
 const meta = {
   file: el<HTMLElement>('m-file'),
@@ -283,6 +286,78 @@ fileInput.addEventListener('change', () => {
   meta.note.textContent = '';
 });
 
+function applyTranscript(data: any): void {
+  plan = render(data.segments as Segment[]);
+  const signable = plan.filter((p) => p.matches.length).length;
+  meta.lang.textContent = `${data.language} (${data.language_probability})`;
+  meta.dur.textContent = `${data.duration}s`;
+  meta.segs.textContent = String(plan.length);
+  meta.cov.textContent = plan.length
+    ? `${signable} / ${plan.length} segments (${Math.round((signable / plan.length) * 100)}%)`
+    : '–';
+  meta.model.textContent = data.model;
+
+  if (data.lecturer) {
+    lecturerImg.src = `${API}${data.lecturer.url}`;
+    lecturerImg.style.display = 'block';
+    meta.note.textContent = `Lecturer found at ${data.lecturer.timestamp}s.`;
+  } else {
+    lecturerImg.style.display = 'none';
+    meta.note.textContent =
+      'No lecturer found in frame — the video may be slides or animation with a voice-over.';
+  }
+
+  // A fetched video carries its own terms. This pipeline reuses the speaker's
+  // likeness, so who published it and under what licence is worth seeing before
+  // the result is used anywhere.
+  if (data.source) {
+    const licence = data.source.license
+      ? `<span class="lic">${data.source.license}</span>`
+      : '<span class="lic">licence not stated</span>';
+    sourceEl.innerHTML =
+      `${licence}<br>by ${data.source.uploader}<br>` +
+      `<a href="${data.source.webpage_url}" target="_blank" rel="noreferrer noopener">source</a>`;
+    sourceEl.style.display = 'block';
+  } else {
+    sourceEl.style.display = 'none';
+  }
+
+  syncToVideo();
+}
+
+fetchBtn.addEventListener('click', async () => {
+  const url = urlInput.value.trim();
+  if (!url) return;
+  fetchBtn.disabled = true;
+  transcribeBtn.disabled = true;
+  chooseBtn.disabled = true;
+  statusEl.textContent = 'Fetching and transcribing…';
+  try {
+    const response = await fetch(
+      `${API}/api/transcribe-url?url=${encodeURIComponent(url)}`,
+      { method: 'POST' },
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail ?? response.status);
+
+    // The fetched file lives on the server, so the page streams it from the
+    // original URL for playback. If that will not embed, the transcript and the
+    // signing still work; only the left pane stays empty.
+    video.src = data.source?.webpage_url ?? '';
+    meta.file.textContent = data.original ?? url;
+    chosen = null;
+    applyTranscript(data);
+    statusEl.textContent = '';
+  } catch (error) {
+    console.error('[lecture]', error);
+    statusEl.textContent = `Could not fetch that URL — ${String(error)}`;
+  } finally {
+    fetchBtn.disabled = false;
+    chooseBtn.disabled = false;
+    transcribeBtn.disabled = chosen === null;
+  }
+});
+
 transcribeBtn.addEventListener('click', async () => {
   if (!chosen) return;
   transcribeBtn.disabled = true;
@@ -295,29 +370,8 @@ transcribeBtn.addEventListener('click', async () => {
     const response = await fetch(`${API}/api/transcribe`, { method: 'POST', body });
     if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
     const data = await response.json();
-
-    plan = render(data.segments as Segment[]);
-
-    const signable = plan.filter((p) => p.matches.length).length;
-    meta.lang.textContent = `${data.language} (${data.language_probability})`;
-    meta.dur.textContent = `${data.duration}s`;
-    meta.segs.textContent = String(plan.length);
-    meta.cov.textContent = plan.length
-      ? `${signable} / ${plan.length} segments (${Math.round((signable / plan.length) * 100)}%)`
-      : '–';
-    meta.model.textContent = data.model;
-
-    if (data.lecturer) {
-      lecturerImg.src = `${API}${data.lecturer.url}`;
-      lecturerImg.style.display = 'block';
-      meta.note.textContent = `Lecturer found at ${data.lecturer.timestamp}s.`;
-    } else {
-      meta.note.textContent =
-        'No lecturer found in frame — the video may be slides or animation with a voice-over.';
-    }
-
+    applyTranscript(data);
     statusEl.textContent = '';
-    syncToVideo();
   } catch (error) {
     console.error('[lecture]', error);
     statusEl.textContent =
