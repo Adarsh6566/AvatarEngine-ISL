@@ -13,8 +13,53 @@ licence is passed through to the caller rather than quietly discarded.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def ffmpeg_path() -> str | None:
+    """ffmpeg, from PATH or from the imageio-ffmpeg wheel.
+
+    It is needed because sites now serve video and audio as SEPARATE streams
+    that have to be spliced back together — YouTube in particular has all but
+    stopped offering the combined "progressive" formats that need no splicing,
+    so asking only for those gets "Requested format is not available" rather
+    than a lower-quality file.
+
+    imageio-ffmpeg ships a binary in the virtualenv, so this works without a
+    system-wide install; a real ffmpeg on PATH is preferred when present.
+    """
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    try:
+        import imageio_ffmpeg
+
+        path = imageio_ffmpeg.get_ffmpeg_exe()
+        return path if Path(path).exists() else None
+    except Exception:
+        return None
+
+
+def _format_for(max_height: int, can_merge: bool) -> str:
+    """What to ask yt-dlp for, given whether streams can be spliced.
+
+    Without ffmpeg the only option is a single file already carrying both
+    tracks, which many sites no longer offer — hence the plain `best` at the
+    end, which may arrive silent. Transcription of a silent file yields no
+    segments, which is at least a legible outcome rather than a crash.
+    """
+    if can_merge:
+        return (
+            f"bestvideo[height<={max_height}]+bestaudio/"
+            f"best[height<={max_height}]/best"
+        )
+    # vcodec/acodec != none is what makes this a single file with both tracks.
+    return (
+        f"best[height<={max_height}][vcodec!=none][acodec!=none]/"
+        f"best[vcodec!=none][acodec!=none]/best"
+    )
 
 
 @dataclass(frozen=True)
@@ -60,14 +105,18 @@ def fetch(url: str, dest_dir: Path, max_height: int = 720, max_duration: float =
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    options = {
-        "format": f"bestvideo[height<={max_height}]+bestaudio/best[height<={max_height}]/best",
+    ffmpeg = ffmpeg_path()
+    options: dict = {
+        "format": _format_for(max_height, ffmpeg is not None),
         "outtmpl": str(dest_dir / "%(id)s.%(ext)s"),
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "restrictfilenames": True,
     }
+    if ffmpeg:
+        # yt-dlp looks for ffmpeg on PATH; the wheel's copy is not there.
+        options["ffmpeg_location"] = ffmpeg
 
     with YoutubeDL(options) as ydl:
         try:
