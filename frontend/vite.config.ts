@@ -62,10 +62,10 @@ function frontendConfigFromYaml() {
       },
       speeds: (() => {
         const m = t.match(/playback_speeds:\s*\[([^\]]+)\]/);
-        if (!m) return [1, 2, 3, 4, 5];
+        if (!m) return [0.25, 0.5, 0.75, 1, 2, 3, 4, 5];
         return m[1].split(',').map((s: string) => parseFloat(s.trim())).filter((n: number) => !isNaN(n));
       })(),
-      defaultSpeed: getNum(/default_speed:\s*(\d+)/, 1),
+      defaultSpeed: getNum(/default_speed:\s*([\d.]+)/, 1),
     };
   } catch { return null; }
 }

@@ -42,7 +42,7 @@ const FALLBACK: AppConfig = {
     concurrency: 6,
     wordPriority: ['HELLO', 'THANKYOU', 'PLEASE', 'SORRY', 'YES', 'NO', 'ME', 'YOU', 'BYE'],
   },
-  speeds: [1, 2, 3, 4, 5],
+  speeds: [0.25, 0.5, 0.75, 1, 2, 3, 4, 5],
   defaultSpeed: 1,
 } as const;
 
