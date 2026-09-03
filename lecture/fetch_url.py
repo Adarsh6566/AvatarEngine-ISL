@@ -87,12 +87,15 @@ class FetchError(RuntimeError):
     pass
 
 
-def fetch(url: str, dest_dir: Path, max_height: int = 720, max_duration: float = 3600.0) -> FetchedVideo:
+def fetch(url: str, dest_dir: Path, max_height: int = 480, max_duration: float = 3600.0) -> FetchedVideo:
     """Download `url` into `dest_dir` and describe what came back.
 
-    Capped at 720p: the pipeline needs audio plus a frame clear enough to find a
-    person, and a 4K download would cost minutes and gigabytes to produce
-    exactly the same transcript.
+    Capped at 480p, which is a reliability setting more than a speed one. The
+    download is where this fails: YouTube drops connections partway, and on a
+    222s lecture the video stream is ~7MB against ~3.4MB of audio, so most of
+    the exposure to that is video nobody needs at full size. The pipeline wants
+    audio plus a frame clear enough to find a person; 480p gives both, and there
+    is less of it to interrupt.
 
     `max_duration` is a guard, not a preference. Whisper is roughly a tenth of
     real time, so an unnoticed three-hour stream would sit transcribing for
@@ -158,6 +161,17 @@ def fetch(url: str, dest_dir: Path, max_height: int = 720, max_duration: float =
         try:
             info = ydl.extract_info(url, download=True)
         except Exception as e:
+            # A dropped connection is the common failure and it is not the
+            # user's fault, so say what happened and what to do rather than
+            # printing a socket error. This is intermittent: the same URL that
+            # fails here usually succeeds on the next attempt.
+            text = str(e)
+            if any(s in text.lower() for s in ("reset", "aborted", "timed out", "10054")):
+                raise FetchError(
+                    "the site dropped the connection partway through the download "
+                    "(this is intermittent — trying again usually works, or use "
+                    "Choose video… with a local file)"
+                ) from e
             raise FetchError(f"download failed: {e}") from e
 
         path = Path(ydl.prepare_filename(info))
