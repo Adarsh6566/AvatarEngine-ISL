@@ -38,7 +38,11 @@ animation:
   fingerspell:
     hold_seconds: 2
     fade_seconds: 0.25
-  playback_speeds: [1, 2, 3, 4, 5]
+  # Slow speeds matter more than fast ones here: a learner following a sign
+  # needs to see the handshape settle, and at 25fps a two-second sign gives very
+  # little time to read it. Ordered slowest to fastest so the button steps up
+  # through them and wraps back to the slowest.
+  playback_speeds: [0.25, 0.5, 0.75, 1, 2, 3, 4, 5]
   default_speed: 1
 
 avatar:

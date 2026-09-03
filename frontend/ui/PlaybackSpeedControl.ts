@@ -1,7 +1,10 @@
 /**
  * PlaybackSpeedControl — speed button at bottom-right.
  *
- * Cycles through 1x → 2x → 3x → 4x → 5x → 1x on click.
+ * Cycles through the steps in config.yaml animation.playback_speeds, slowest
+ * to fastest, wrapping back to the slowest. Fractional steps are supported and
+ * are the point: 0.25x holds a two-second sign long enough to read the
+ * handshape, which full speed does not.
  * Notifies the composition root via onChange so the Sequencer and
  * AnimationController stay in sync (mixer timeScale + hold timing).
  */
