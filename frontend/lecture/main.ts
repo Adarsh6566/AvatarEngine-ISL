@@ -325,13 +325,33 @@ function applyTranscript(data: any): void {
   syncToVideo();
 }
 
+/**
+ * Show a message with the seconds ticking up, until the returned stop() runs.
+ *
+ * Fetching a URL takes as long as the download does — measured at 114s for a
+ * four-minute lecture — and a caption that never changes for two minutes reads
+ * as a hang rather than as work in progress. The elapsed count is the only
+ * honest signal available, since neither yt-dlp's progress nor Whisper's is
+ * visible from here.
+ */
+function progress(label: string): () => void {
+  const started = Date.now();
+  const tick = () => {
+    const s = Math.round((Date.now() - started) / 1000);
+    statusEl.textContent = `${label} ${s}s`;
+  };
+  tick();
+  const timer = window.setInterval(tick, 1000);
+  return () => window.clearInterval(timer);
+}
+
 fetchBtn.addEventListener('click', async () => {
   const url = urlInput.value.trim();
   if (!url) return;
   fetchBtn.disabled = true;
   transcribeBtn.disabled = true;
   chooseBtn.disabled = true;
-  statusEl.textContent = 'Fetching and transcribing…';
+  const stop = progress('Downloading and transcribing — this can take a couple of minutes…');
   try {
     const response = await fetch(
       `${API}/api/transcribe-url?url=${encodeURIComponent(url)}`,
@@ -354,10 +374,17 @@ fetchBtn.addEventListener('click', async () => {
     meta.file.textContent = data.original ?? url;
     chosen = null;
     applyTranscript(data);
+    stop();
     statusEl.textContent = '';
   } catch (error) {
+    stop();
     console.error('[lecture]', error);
-    statusEl.textContent = `Could not fetch that URL — ${String(error)}`;
+    // A dead backend fails as a bare TypeError, which tells the user nothing.
+    const hint =
+      error instanceof TypeError
+        ? `no response from ${API} — is the lecture server running on port 8002?`
+        : String(error);
+    statusEl.textContent = `Could not fetch that URL — ${hint}`;
   } finally {
     fetchBtn.disabled = false;
     chooseBtn.disabled = false;
@@ -369,7 +396,7 @@ transcribeBtn.addEventListener('click', async () => {
   if (!chosen) return;
   transcribeBtn.disabled = true;
   chooseBtn.disabled = true;
-  statusEl.textContent = 'Transcribing… (roughly a tenth of the video length)';
+  const stop = progress('Transcribing…');
 
   try {
     const body = new FormData();
@@ -378,8 +405,10 @@ transcribeBtn.addEventListener('click', async () => {
     if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
     const data = await response.json();
     applyTranscript(data);
+    stop();
     statusEl.textContent = '';
   } catch (error) {
+    stop();
     console.error('[lecture]', error);
     statusEl.textContent =
       `Transcription failed — is the lecture server running on ${API}? (${String(error)})`;
