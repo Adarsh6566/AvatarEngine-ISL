@@ -7,17 +7,29 @@
     "dev": "vite",
     "dev:all": "node scripts/dev.mjs",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "npm run build && cap sync android && cap open android"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.1",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
     "@types/three": "^0.185.1",
+    "@vitejs/plugin-react": "^6.1.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
     "@pixiv/three-vrm": "^3.5.5",
     "@pixiv/three-vrm-animation": "^3.5.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "three": "^0.185.1",
     "three-stdlib": "^2.36.1"
   }

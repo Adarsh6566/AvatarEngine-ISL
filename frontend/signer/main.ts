@@ -14,6 +14,8 @@ import { ActivityIndicator } from '../ui/ActivityIndicator';
 import { PlaybackSpeedControl } from '../ui/PlaybackSpeedControl';
 import { matchSigns, knownPhrases } from './SignLibrary';
 import { SpeechInput, isSpeechSupported } from './SpeechInput';
+import { AVATAR, fitToChrome } from '../avatar/framing/fitToChrome';
+import { hideLegs } from '../avatar/framing/hideLegs';
 import type { VRM } from '@pixiv/three-vrm';
 
 /**
@@ -234,63 +236,39 @@ document.querySelector<HTMLSpanElement>('#known')!.textContent = knownPhrases().
 // --- responsive framing ------------------------------------------------------
 const bar = document.querySelector<HTMLDivElement>('.bar')!;
 
-/** Avatar extent in world units: boots to crown, with the +0.2 scene lift. */
-const AVATAR_FEET_Y = 0.15;
-const AVATAR_HEAD_Y = 2.05;
-
-/**
- * Height the caption occupies at its WORST case, as a fraction of the viewport.
- *
- * The caption is empty when idle and grows when a sign starts, so measuring it
- * live would move the camera mid-sign. Measure it once holding the longest
- * phrase the library knows, and reserve that.
- */
-function captionReserve(viewportHeight: number): number {
-  const word = document.querySelector<HTMLDivElement>('#caption')!;
-  const previous = word.textContent;
-  const longest = knownPhrases().reduce((a, b) => (b.length > a.length ? b : a), '');
-  word.textContent = longest;
-  const height = captionRoot.getBoundingClientRect().height;
-  word.textContent = previous;
-  return Math.min((height + 24) / viewportHeight, 0.42);
-}
 
 /**
  * Fit the avatar into the space the floating chrome leaves free.
  *
- * The caption and input bar are position:fixed OVER the canvas, so the usable
- * band is what remains between them. On a desktop viewport that chrome is a
- * small fraction of the height and the original framing already clears it; on a
- * tall phone it can take over a third, which is what pushed the feet behind the
- * input bar. Blending on ASPECT rather than a pixel breakpoint means this reacts
- * to any viewport — phone, tablet, split-screen, resized window.
+ * The measuring and the arithmetic both live in avatar/framing/fitToChrome, so
+ * this page and the .vrma page cannot drift apart on it — they had already
+ * drifted once, this page reserving the caption band and that one not
+ * reserving it at all.
+ *
+ * The caption is filled with the longest phrase the library knows for the
+ * duration of the measurement. It is empty while idle and grows when a sign
+ * starts, so measuring it as-found would move the camera the moment a sign
+ * began and the avatar would flinch on every word.
  */
 function frameCamera(): void {
-  const height = Math.max(container.clientHeight, 1);
-  const aspect = container.clientWidth / height;
-
-  const bottomFraction = Math.min((bar.getBoundingClientRect().height + 26) / height, 0.42);
-  const topFraction = captionReserve(height);
-  const usable = Math.max(0.32, 1 - topFraction - bottomFraction);
-
-  const span = AVATAR_HEAD_Y - AVATAR_FEET_Y;
-  const middle = (AVATAR_HEAD_Y + AVATAR_FEET_Y) / 2;
-
-  // Frustum tall enough that the avatar plus 8% breathing room fits the usable
-  // band, then the distance producing that frustum at this FOV.
-  const frustum = (span * 1.08) / usable;
-  const fitDistance = frustum / 2 / Math.tan(THREE.MathUtils.degToRad(engine.camera.fov) / 2);
-  // Centre the avatar in the usable band, not in the viewport.
-  const fitTargetY = middle - (frustum * (bottomFraction - topFraction)) / 2;
-
-  // 0 at 1.2 aspect and wider (untouched desktop), 1 at 0.6 and taller.
-  const t = THREE.MathUtils.clamp((1.2 - aspect) / (1.2 - 0.6), 0, 1);
-  const distance = THREE.MathUtils.lerp(DESKTOP_DISTANCE, Math.max(fitDistance, DESKTOP_DISTANCE), t);
-  const targetY = THREE.MathUtils.lerp(DESKTOP_TARGET_Y, fitTargetY, t);
-
-  engine.camera.position.set(0, targetY + CAMERA_RISE, distance);
-  controls.target.set(0, targetY, 0);
-  controls.update();
+  const word = document.querySelector<HTMLDivElement>('#caption')!;
+  const previous = word.textContent;
+  word.textContent = knownPhrases().reduce((a, b) => (b.length > a.length ? b : a), '');
+  try {
+    fitToChrome({
+      container,
+      camera: engine.camera,
+      controls,
+      top: captionRoot,
+      bottom: bar,
+      feetY: AVATAR.signingFloorY,
+      headY: AVATAR.crownY,
+      minDistance: DESKTOP_DISTANCE,
+      rise: CAMERA_RISE,
+    });
+  } finally {
+    word.textContent = previous;
+  }
 }
 
 frameCamera();
@@ -441,6 +419,7 @@ new VrmLoader()
   .then((loaded) => {
     vrm = loaded;
     loaded.scene.position.y = 0.2;
+    hideLegs(loaded);
     engine.add(loaded.scene);
     // Measure rest in the T-pose, before anything poses the model. Nothing here
     // applies a resting pose, so the capture is clean.

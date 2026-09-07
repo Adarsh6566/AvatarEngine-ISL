@@ -24,17 +24,17 @@ export class SignCaption {
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
-    this.root.className = 'caption';
+    this.root.className = 'vrma-caption';
     this.root.dataset.state = 'idle';
 
     const box = document.createElement('div');
-    box.className = 'caption__box';
+    box.className = 'vrma-caption__box';
 
     this.word = document.createElement('div');
-    this.word.className = 'caption__word';
+    this.word.className = 'vrma-caption__word';
 
     this.meta = document.createElement('div');
-    this.meta.className = 'caption__meta';
+    this.meta.className = 'vrma-caption__meta';
 
     box.append(this.word, this.meta);
     this.root.append(box);
@@ -56,7 +56,7 @@ export class SignCaption {
     if (segment.spelled) {
       for (const character of segment.word) {
         const span = document.createElement('span');
-        span.className = 'caption__letter';
+        span.className = 'vrma-caption__letter';
         span.textContent = character;
         this.letters.push(span);
         this.word.append(span);

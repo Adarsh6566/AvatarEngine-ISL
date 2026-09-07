@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
 import { readFileSync, existsSync } from 'node:fs';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 function configPath(): string {
   if (existsSync('config.yaml')) return 'config.yaml';
@@ -75,6 +77,7 @@ const FRONTEND_CFG = frontendConfigFromYaml();
 export default defineConfig({
   root: '.',
   publicDir: '../public',
+  plugins: [react(), tailwindcss()],
   define: FRONTEND_CFG ? { __APP_CONFIG__: JSON.stringify(FRONTEND_CFG) } : {},
   server: {
     fs: { allow: ['..'] },

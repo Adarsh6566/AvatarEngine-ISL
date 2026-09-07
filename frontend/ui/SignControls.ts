@@ -19,14 +19,14 @@ export class SignControls {
 
   constructor(parent: HTMLElement, options: SignControlsOptions) {
     const root = document.createElement('div');
-    root.className = 'bar';
+    root.className = 'vrma-bar';
 
     const field = document.createElement('div');
-    field.className = 'bar__field';
+    field.className = 'vrma-bar__field';
 
     this.input = document.createElement('input');
     this.input.type = 'text';
-    this.input.className = 'bar__input';
+    this.input.className = 'vrma-bar__input';
     this.input.placeholder = 'Say something…';
     this.input.autocomplete = 'off';
     this.input.spellcheck = false;
@@ -36,11 +36,11 @@ export class SignControls {
 
     this.button = document.createElement('button');
     this.button.type = 'button';
-    this.button.className = 'bar__button';
+    this.button.className = 'vrma-bar__button';
     this.button.textContent = 'Sign';
 
     this.message = document.createElement('p');
-    this.message.className = 'bar__message';
+    this.message.className = 'vrma-bar__message';
     this.message.setAttribute('role', 'status');
 
     field.append(this.input, this.button);

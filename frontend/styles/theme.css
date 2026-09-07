@@ -1,0 +1,517 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens for avatar-engine, as Tailwind v4 theme variables.
+ *
+ * Tailwind v4 is configured in CSS rather than a JS file: every custom property
+ * declared in @theme becomes a utility, so --color-paper gives bg-paper /
+ * text-paper / border-paper, --font-mono gives font-mono, --ease-signer gives
+ * ease-signer.
+ *
+ * These were lifted from three places that had drifted apart — style.css,
+ * signer.html and lecture.html each declared their own :root. The drift is
+ * PRESERVED here rather than resolved, so the converted pages render exactly as
+ * they did before:
+ *
+ *   red #c4453d (index)  vs  accent #b4443a (signer, lecture)
+ *   ease 0.22,0.61,0.36,1     vs  0.2,0.7,0.3,1
+ *   muted #8a837a             vs  rgba(22,19,15,0.55)
+ *   hairline 0.09 alpha       vs  line 0.12 alpha
+ *
+ * Two of each is drift, not design, and collapsing them is a deliberate visual
+ * change rather than a refactor — so it is left as a decision to make, not one
+ * made silently during a framework migration.
+ */
+@theme {
+  /* Warm paper rather than white — easier to sit with, and it flatters skin
+     tones on the avatar in a way pure #fff does not. */
+  --color-paper: #f2efe9;
+  --color-ink: #16130f;
+
+  /* The accent, twice. See the note above. */
+  --color-red: #c4453d;
+  --color-red-deep: #a9352e;
+  --color-accent: #b4443a;
+  --color-accent-deep: #9d3b32;
+
+  --color-muted: #8a837a;
+  --color-muted-soft: rgba(22, 19, 15, 0.55);
+  --color-hairline: rgba(22, 19, 15, 0.09);
+  --color-line: rgba(22, 19, 15, 0.12);
+
+  --font-display: 'Helvetica Neue', Helvetica, 'Inter', 'Segoe UI', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+  --font-ui: ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+  --ease-brand: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-signer: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/*
+ * Page ground, set here rather than as classes on <body>.
+ *
+ * The stylesheet arrives with the JS bundle that imports it, so a body styled
+ * only by utility classes paints unstyled first — white, then paper. Declaring
+ * it in the cascade means the ground is correct as soon as the sheet lands,
+ * whatever the markup says.
+ *
+ * Tailwind's preflight already supplies box-sizing, the body margin reset and
+ * display:block on canvas, so none of those are repeated.
+ */
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-ui);
+  }
+}
+
+/* The mic pulses while listening — the one state a user must never be unsure
+   of — and the loader spins. Both are keyframes, which have no utility form. */
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(180, 68, 58, 0.45); }
+  50%      { box-shadow: 0 0 0 7px rgba(180, 68, 58, 0); }
+}
+@keyframes activity-spin {
+  to { transform: rotate(360deg); }
+}
+
+@layer components {
+  /*
+   * ActivityIndicator and PlaybackSpeedControl are imperative widgets that
+   * append themselves to document.body — they predate React here and are
+   * shared by every pipeline, so they cannot carry Tailwind classes from a
+   * component that does not render them.
+   *
+   * Their styles previously lived TWICE, once in style.css and once inline in
+   * signer.html, which is how the two pages ended up with subtly different
+   * hairlines. One definition now, in the layer the widgets can rely on.
+   */
+  .activity {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 30;
+    pointer-events: none;
+    opacity: 0;
+    transform: scale(0.92);
+    transition:
+      opacity 0.22s var(--ease-signer),
+      transform 0.22s var(--ease-signer);
+  }
+  .activity[data-active='true'] {
+    opacity: 1;
+    transform: scale(1);
+  }
+  .activity__spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid rgba(22, 19, 15, 0.12);
+    border-top-color: var(--color-accent);
+    border-radius: 50%;
+    animation: activity-spin 0.7s linear infinite;
+  }
+
+  /* --- .vrma pipeline (index) -------------------------------------------
+   *
+   * The input bar and the fingerspelling caption, ported from style.css.
+   *
+   * Namespaced .vrma-*. They were .bar and .caption, which was safe while each
+   * page had its own stylesheet and became a collision the moment those were
+   * merged here: the signer and lecture pages have their own elements with
+   * those class names, and picked these up as well. The visible symptom was a
+   * bar translated twice — Tailwind v4 sets the `translate` property while
+   * this block sets `transform`, so the two composed instead of one winning,
+   * and the input bar sat half off the left edge of a phone.
+   * They stay component classes rather than utility strings because
+   * SignControls and SignCaption build their own DOM — no JSX ever sees these
+   * nodes — and because the caption encodes real state in CSS: a spelled word
+   * dims every letter, half-lights the ones already signed and full-lights the
+   * current one. That reads far better as .vrma-caption__letter.is-active than as
+   * a conditional utility string assembled in TypeScript.
+   */
+  .vrma-caption {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    padding: 28px 20px 0;
+    z-index: 20;
+    pointer-events: none;
+
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.32s var(--ease-brand), transform 0.32s var(--ease-brand);
+  }
+
+  .vrma-caption[data-state='active'] {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .vrma-caption__box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+
+    min-width: 200px;
+    padding: 18px 34px 14px;
+
+    background: var(--color-red);
+    border-radius: 16px;
+    /* Layered rather than one heavy blur — keeps the edge crisp while the
+       shadow stays soft. */
+    box-shadow:
+      0 1px 2px rgba(122, 32, 27, 0.2),
+      0 12px 32px -8px rgba(122, 32, 27, 0.45);
+  }
+
+  .vrma-caption__word {
+    display: flex;
+    gap: 0.04em;
+
+    /* Sized against BOTH axes. It was 6vw, which reads the window's width to
+       decide how much of its height to occupy — so a short, wide window got
+       60px type in a 98px box floating over an avatar framed to a fraction of
+       that height, and the caption printed itself across the face. Whichever
+       axis is scarcer now wins. */
+    font-size: clamp(1.5rem, min(6vw, 6vh), 3.75rem);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: #fff;
+  }
+
+  .vrma-caption[data-mode='spelled'] .vrma-caption__word {
+    /* Spelled words are read letter by letter, so give them room and a fixed
+       advance — proportional type makes the highlight jump around. */
+    font-family: var(--font-mono);
+    font-weight: 500;
+    gap: 0.12em;
+    letter-spacing: 0;
+  }
+
+  .vrma-caption__letter {
+    display: inline-block;
+    /* Dim until its turn. The active letter is full white; letters already
+       signed stay half-lit so you can see how far along the word is. */
+    color: rgba(255, 255, 255, 0.34);
+    transform: translateY(0) scale(1);
+    transition:
+      color 0.18s var(--ease-brand),
+      opacity 0.18s var(--ease-brand),
+      transform 0.24s var(--ease-brand);
+  }
+
+  .vrma-caption__letter.is-done {
+    color: rgba(255, 255, 255, 0.62);
+  }
+
+  .vrma-caption__letter.is-active {
+    color: #fff;
+    transform: translateY(-2px) scale(1.06);
+  }
+
+  .vrma-caption__meta {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  /* ---------------------------------------------------------------------------
+     Input bar — floats over the canvas, bottom centre.
+     --------------------------------------------------------------------------- */
+
+  .vrma-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    z-index: 10;
+    width: min(520px, calc(100vw - 40px));
+  }
+
+  .vrma-bar__field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 7px 7px 8px;
+
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid var(--color-hairline);
+    border-radius: 999px;
+    box-shadow:
+      0 1px 2px rgba(22, 19, 15, 0.04),
+      0 10px 30px -12px rgba(22, 19, 15, 0.22);
+
+    transition: box-shadow 0.24s var(--ease-brand), border-color 0.24s var(--ease-brand);
+  }
+
+  .vrma-bar__field:focus-within {
+    border-color: rgba(196, 69, 61, 0.45);
+    box-shadow:
+      0 1px 2px rgba(22, 19, 15, 0.04),
+      0 10px 30px -12px rgba(22, 19, 15, 0.26),
+      0 0 0 4px rgba(196, 69, 61, 0.1);
+  }
+
+  .vrma-bar__input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+
+    font-family: inherit;
+    font-size: 1.0625rem;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
+
+    background: transparent;
+    border: 0;
+    outline: none;
+  }
+
+  .vrma-bar__input::placeholder {
+    color: var(--color-muted);
+  }
+
+  .vrma-bar__input:disabled {
+    color: var(--color-muted);
+  }
+
+  .vrma-bar__button {
+    flex: none;
+    padding: 11px 22px;
+
+    font-family: inherit;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    color: #fff;
+
+    background: var(--color-red);
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+
+    transition: background 0.18s var(--ease-brand), transform 0.18s var(--ease-brand);
+  }
+
+  .vrma-bar__button:hover:not(:disabled) {
+    background: var(--color-red-deep);
+  }
+
+  .vrma-bar__button:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+
+  .vrma-bar__button:disabled {
+    background: rgba(22, 19, 15, 0.14);
+    color: rgba(22, 19, 15, 0.38);
+    cursor: default;
+  }
+
+  .vrma-bar__message {
+    display: none;
+  }
+
+  /* ---------------------------------------------------------------------------
+     Activity indicator — top-right rotating spinner.
+
+  /* --- lecture page ------------------------------------------------------
+   *
+   * These are the pieces JSX cannot reach. The .seg rows are built one per
+   * transcript segment by render() in lecture/main.ts, and .source-panel and
+   * #lecturer are toggled by main.ts writing style.display directly — an inline
+   * style, so it wins over the display set here without needing !important.
+   */
+  .lecture-btn {
+    font: inherit;
+    border-radius: 999px;
+    cursor: pointer;
+    border: 1px solid var(--color-line);
+    background: #fff;
+    color: var(--color-ink);
+    padding: 8px 16px;
+    transition: background 0.18s var(--ease-signer);
+  }
+  .lecture-btn:hover:not(:disabled) {
+    background: rgba(22, 19, 15, 0.05);
+  }
+  .lecture-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .lecture-btn--primary {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: #fff;
+  }
+  .lecture-btn--primary:hover:not(:disabled) {
+    background: var(--color-accent-deep);
+  }
+
+  .pane-label {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    z-index: 5;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-muted-soft);
+    pointer-events: none;
+  }
+
+  .source-panel {
+    display: none;
+    margin-top: 10px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    background: rgba(22, 19, 15, 0.03);
+  }
+  .source-panel a {
+    color: var(--color-accent);
+  }
+  .source-panel .lic {
+    font-weight: 600;
+  }
+
+  .seg {
+    display: grid;
+    grid-template-columns: 92px 1fr auto;
+    gap: 12px;
+    align-items: baseline;
+    padding: 6px 16px;
+    border-left: 3px solid transparent;
+  }
+  .seg[data-active='true'] {
+    background: rgba(180, 68, 58, 0.07);
+    border-left-color: var(--color-accent);
+  }
+  .seg__time {
+    font: 12px/1.4 var(--font-mono);
+    color: var(--color-muted-soft);
+  }
+  .seg__text {
+    min-width: 0;
+  }
+  .seg__signs {
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+  .seg__signs b {
+    color: var(--color-accent);
+    font-weight: 600;
+  }
+  .seg__signs i {
+    color: rgba(22, 19, 15, 0.3);
+    font-style: normal;
+  }
+
+  /*
+   * Draggable pane divider.
+   *
+   * The line takes exactly 1px of layout, because a thicker bar would be a
+   * permanent tax on a screen whose whole point is the two video panes. The
+   * HIT AREA is 11px, added by a ::before that overhangs the neighbours — a
+   * one-pixel drag target is awkward with a mouse and unusable with a finger.
+   *
+   * The overhang is safe: nothing sits at the seam but the panes themselves,
+   * and the divider is above them, so the only thing it steals is a few pixels
+   * of empty edge.
+   */
+  .splitter {
+    position: relative;
+    z-index: 20;
+    background: var(--color-line);
+    touch-action: none;
+    transition: background 0.15s var(--ease-signer);
+  }
+  .splitter::before {
+    content: '';
+    position: absolute;
+    /* Widened along the drag axis, flush along the other. */
+    inset: -5px;
+  }
+  .splitter:hover,
+  .splitter:focus-visible {
+    background: var(--color-accent);
+    outline: none;
+  }
+  .splitter[data-dragging='true'] {
+    background: var(--color-accent);
+  }
+  .splitter--vertical {
+    width: 1px;
+    cursor: col-resize;
+  }
+  .splitter--vertical::before {
+    inset-block: 0;
+    inset-inline: -5px;
+  }
+  .splitter--horizontal {
+    height: 1px;
+    cursor: row-resize;
+  }
+  .splitter--horizontal::before {
+    inset-inline: 0;
+    inset-block: -5px;
+  }
+
+  .speed-control {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 10;
+    min-width: 56px;
+    padding: 10px 16px;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--color-ink);
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    cursor: pointer;
+    transition:
+      background 0.18s var(--ease-signer),
+      transform 0.18s var(--ease-signer);
+
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(20px) saturate(1.4);
+    box-shadow:
+      0 1px 2px rgba(22, 19, 15, 0.04),
+      0 10px 30px -12px rgba(22, 19, 15, 0.22);
+  }
+  .speed-control:hover {
+    background: #fff;
+  }
+  .speed-control:active {
+    transform: scale(0.96);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .activity__spinner {
+      animation-duration: 1.4s;
+    }
+  }
+}

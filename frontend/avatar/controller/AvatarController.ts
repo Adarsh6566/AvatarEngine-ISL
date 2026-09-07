@@ -8,6 +8,7 @@ import { VRMUtils, type VRM } from '@pixiv/three-vrm';
 import { VRMAGestureLoader } from '../loading/VRMAGestureLoader';
 import { GestureRegistry, type GestureManifestEntry } from '../gestures/GestureRegistry';
 import { APP_CONFIG } from '../../config/appConfig';
+import { hideLegs } from '../framing/hideLegs';
 
 /**
  * AvatarController — the ONLY public class of the avatar module.
@@ -45,6 +46,8 @@ export class AvatarController {
     this.vrm = vrm;
     // Lift avatar slightly so feet clear the bottom input bar overlay.
     vrm.scene.position.y = 0.2;
+    // ISL is signed above the waist; the legs only take up frame. See hideLegs.
+    hideLegs(vrm);
     this.engine.add(vrm.scene);
 
     // Inject the concrete backends — the only places three-vrm is touched.

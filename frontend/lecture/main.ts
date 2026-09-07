@@ -10,6 +10,8 @@ import {
   type SkeletonStreamFrame,
 } from '../skeleton/SkeletonStream';
 import { matchSigns, type SignMatch } from '../signer/SignLibrary';
+import { AVATAR, fitToChrome } from '../avatar/framing/fitToChrome';
+import { hideLegs } from '../avatar/framing/hideLegs';
 import type { VRM } from '@pixiv/three-vrm';
 
 /**
@@ -72,6 +74,50 @@ fill.position.set(-1.4, 0.6, 0.8);
 engine.add(fill);
 
 const retargeter = new SkeletonRetargeter({ fingerMode: 'full', fingerSmoothing: 0.9 });
+
+/*
+ * Keep the avatar clear of the caption.
+ *
+ * The caption floats over this pane, so the space actually available to the
+ * avatar is what remains below it. That matters more here than on the other
+ * pipelines because THIS pane is resizable: the user drags the splitter and its
+ * height changes arbitrarily, while the caption stays a fixed number of pixels.
+ * A framing chosen once at load is wrong as soon as the pane is dragged.
+ *
+ * The framed band comes from AVATAR — waist to crown, shared with the other
+ * two pipelines.
+ */
+const MIN_DISTANCE = 4.2; // the framing this pane has always used
+
+function frameCamera(): void {
+  const word = captionEl;
+  const previous = word.textContent;
+  // Measure at a worst case: the caption is empty while idle and grows when a
+  // phrase starts, so measuring it as-found would shift the camera mid-sign.
+  word.textContent = 'good afternoon';
+  try {
+    fitToChrome({
+      container: mount,
+      camera: engine.camera,
+      top: captionRoot,
+      bottom: null, // nothing floats over the bottom of this pane
+      feetY: AVATAR.signingFloorY,
+      headY: AVATAR.crownY,
+      minDistance: MIN_DISTANCE,
+      rise: 0.15,
+    });
+  } finally {
+    word.textContent = previous;
+  }
+}
+
+frameCamera();
+try {
+  new ResizeObserver(() => frameCamera()).observe(mount);
+} catch {
+  window.addEventListener('resize', frameCamera);
+}
+
 let vrm: VRM | null = null;
 
 // --- playback ----------------------------------------------------------------
@@ -424,6 +470,7 @@ new VrmLoader()
   .then((loaded) => {
     vrm = loaded;
     loaded.scene.position.y = 0.2;
+    hideLegs(loaded);
     engine.add(loaded.scene);
     retargeter.captureRest(loaded);
     console.info('[lecture] avatar ready');
