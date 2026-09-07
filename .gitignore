@@ -88,3 +88,12 @@ pipeline/.models/*
 # Misc
 *.tmp
 *.temp
+
+# Capacitor — the Android project is generated from dist/ by `cap sync`.
+# The build output it copies in is itself generated, so neither is committed;
+# `npm run android:sync` reproduces both.
+frontend/android/app/src/main/assets/public/
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/local.properties
