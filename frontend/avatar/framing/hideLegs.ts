@@ -1,47 +1,100 @@
-import { VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
+import * as THREE from 'three';
+import type { VRM } from '@pixiv/three-vrm';
 
 /**
- * Collapse the avatar's legs so only the signing half of the body renders.
+ * Trim the avatar below the waist, so only the signing half of the body exists.
  *
  * ISL is signed between roughly the hips and above the head. The legs carry no
  * linguistic information, cost half the frame, and — once the camera is framed
  * waist-up — reappear underneath the floating input bar, which reads as a bug.
  *
- * They cannot simply be hidden. The model's geometry is grouped by MATERIAL,
- * not by body part: `Bottoms` (1,376 tris) and `Shoes` (524) are their own
- * primitives, but the bare skin of the legs lives inside `Body_00_SKIN`, a
- * single 9,532-triangle primitive that also contains the arms, hands, neck and
- * torso. Hiding that removes the hands, which are the entire point.
+ * WHY THE GEOMETRY IS EDITED RATHER THAN HIDDEN
+ * ---------------------------------------------
+ * Two simpler approaches were tried first and both failed, for reasons worth
+ * keeping so they are not retried:
  *
- * So the legs are collapsed through the SKELETON instead. Scaling a bone scales
- * everything skinned to it and to its children, so shrinking the two upper-leg
- * bones pulls the whole chain — thighs, calves, feet, trousers and shoes alike,
- * since all of them are weighted to these joints — down to a point inside the
- * hips, where the torso hides it.
+ * 1. Hiding the leg meshes. Impossible: the model is grouped by MATERIAL, not
+ *    by body part. `Bottoms` and `Shoes` are their own primitives, but the bare
+ *    skin of the legs lives inside `Body_00_SKIN` — a single 9,532-triangle
+ *    primitive that also holds the arms, hands, neck and torso. Hiding it takes
+ *    the hands with it, and the hands are the entire point.
  *
- * Scale is used rather than a zero scale because an exact 0 produces a
- * degenerate matrix: normals become undefined and some drivers render a spray
- * of stretched triangles instead of nothing.
+ * 2. Collapsing the leg BONES, then clipping away what remained. Scaling
+ *    leftUpperLeg/rightUpperLeg does shrink the legs, but geometry is weighted
+ *    per joint and `hips` is its own skin joint — the pelvis, the crotch of the
+ *    body mesh and the trouser waistband are weighted there and survived
+ *    untouched, leaving a stump under the jacket. `hips` cannot be scaled away
+ *    in turn, because the whole skeleton descends from it. Adding a clipping
+ *    plane to remove the stump then broke something worse: clipping tests the
+ *    ANIMATED world position, so the arms were erased the moment the hands
+ *    dropped toward the hips — which in sign language is constantly.
  *
- * This is applied to the RAW bone nodes. The normalized humanoid bones are
- * proxies whose transforms are rewritten from the normalized pose on every
- * humanoid.update(), so a scale written there is discarded on the next frame —
- * the raw hierarchy is what actually skins the mesh.
+ * So the triangles are removed instead, tested against the BIND POSE. A
+ * vertex's bind position does not change when the avatar moves, so nothing that
+ * is kept can later be cut: the hands may travel wherever the sign takes them
+ * and stay whole. It is also cheaper than either alternative, since the removed
+ * triangles are never submitted to the GPU at all.
  *
- * Reversible: nothing is deleted, so restoring scale 1 brings the legs back.
+ * Nothing is written to disk; this edits the loaded geometry in memory, so
+ * reloading the model restores the legs.
  */
-const LEG_ROOTS = [VRMHumanBoneName.LeftUpperLeg, VRMHumanBoneName.RightUpperLeg];
 
-/** Small enough to vanish inside the hips, large enough to stay non-degenerate. */
-const COLLAPSED = 0.001;
+/**
+ * Bind-pose height below which geometry is dropped, in the model's own units
+ * (before the +0.2 lift each pipeline applies when adding the scene).
+ *
+ * From this rig: hips sit at 1.027, the upper-leg joints at 0.983. The cut goes
+ * just above the hips joint so the pelvis goes with the legs, taking a little
+ * jacket hem with it — which is below the framed area anyway.
+ */
+const WAIST_Y = 1.05;
 
-export function hideLegs(vrm: VRM, hidden = true): void {
-  const scale = hidden ? COLLAPSED : 1;
-  for (const bone of LEG_ROOTS) {
-    // getRawBoneNode is the VRM 1.0 accessor; older rigs expose only the
-    // normalized proxy, and scaling that is better than doing nothing.
-    const node =
-      vrm.humanoid.getRawBoneNode?.(bone) ?? vrm.humanoid.getNormalizedBoneNode(bone);
-    node?.scale.setScalar(scale);
+/**
+ * Drop every triangle lying entirely below WAIST_Y in the bind pose.
+ *
+ * Only triangles with ALL THREE vertices below the line go. Dropping any
+ * triangle that merely crosses it would erode a ragged edge up into the torso;
+ * keeping the straddlers leaves a slightly uneven hem that the jacket hides.
+ */
+function trimBelowWaist(mesh: THREE.Mesh): void {
+  const geometry = mesh.geometry;
+  const position = geometry.getAttribute('position');
+  if (!position) return;
+
+  const below = (i: number) => position.getY(i) < WAIST_Y;
+  const kept: number[] = [];
+
+  if (geometry.index) {
+    const index = geometry.index;
+    for (let t = 0; t < index.count; t += 3) {
+      const a = index.getX(t);
+      const b = index.getX(t + 1);
+      const c = index.getX(t + 2);
+      if (below(a) && below(b) && below(c)) continue;
+      kept.push(a, b, c);
+    }
+    if (kept.length === index.count) return; // nothing below the waist
+    geometry.setIndex(kept);
+  } else {
+    // Non-indexed: build an index selecting the triangles worth keeping, rather
+    // than rewriting the much larger position buffer.
+    for (let v = 0; v < position.count; v += 3) {
+      if (below(v) && below(v + 1) && below(v + 2)) continue;
+      kept.push(v, v + 1, v + 2);
+    }
+    if (kept.length === position.count) return;
+    geometry.setIndex(kept);
   }
+
+  // The bounding volumes still describe a whole body. A stale bounding sphere
+  // makes frustum culling drop the mesh entirely at some camera angles.
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+}
+
+export function hideLegs(vrm: VRM): void {
+  vrm.scene.traverse((object) => {
+    const mesh = object as THREE.Mesh;
+    if (mesh.isMesh && mesh.geometry) trimBelowWaist(mesh);
+  });
 }

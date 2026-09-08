@@ -12,7 +12,8 @@ import {
 } from '../skeleton/SkeletonStream';
 import { ActivityIndicator } from '../ui/ActivityIndicator';
 import { PlaybackSpeedControl } from '../ui/PlaybackSpeedControl';
-import { matchSigns, knownPhrases } from './SignLibrary';
+import { knownPhrases } from './SignLibrary';
+import { translateToSigns } from './glossTranslate';
 import { SpeechInput, isSpeechSupported } from './SpeechInput';
 import { AVATAR, fitToChrome } from '../avatar/framing/fitToChrome';
 import { hideLegs } from '../avatar/framing/hideLegs';
@@ -325,7 +326,13 @@ async function drain(): Promise<void> {
 
 async function run(text: string): Promise<void> {
   if (busy) return;
-  const matches = matchSigns(text);
+
+  // Translation is a network round trip, so say something first — otherwise the
+  // gap between pressing Sign and the avatar moving reads as the button not
+  // having worked.
+  status.textContent = 'Translating…';
+  const { matches, source } = await translateToSigns(text);
+  status.textContent = '';
 
   if (matches.length === 0) {
     status.textContent = text.trim()
@@ -339,7 +346,9 @@ async function run(text: string): Promise<void> {
   // The input stays usable while listening: disabling it would fight the
   // interim transcript being written into it.
   input.disabled = !speech?.listening;
-  status.textContent = '';
+  // Named honestly: 'matched' means the string lookup ran, not that anything
+  // was translated. Silence here would present the fallback as a translation.
+  status.textContent = source === 'llm' ? 'translated' : 'matched';
 
   try {
     for (const match of matches) {

@@ -22,6 +22,10 @@ class SkeletonFrame(BaseModel):
     index: int
     timestamp: float
     joints: JointsMap
+    # Blendshape coefficients (0-1) for this frame's facial expression, keyed by
+    # ARKit-style name. Absent when face capture is off or no face was found —
+    # which is NOT the same as a neutral face, so it stays None rather than {}.
+    face: Optional[Dict[str, float]] = None
 
 
 class SkeletonMeta(BaseModel):
