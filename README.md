@@ -236,3 +236,38 @@ $env:Path = "C:\Program Files\nodejs;$env:Path"
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Single-source manifest decision |
 | [`AGENTS.md`](AGENTS.md) | Architecture and agent rules |
 | [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Every file modification |
+
+
+Run it yourself in the Zed terminal
+
+Three servers, one per terminal tab, all from the repo root.
+
+Tab 1 — backend (only needed for the .vrma pipeline):
+
+.\.venv\Scripts\python.exe -m uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
+
+Tab 2 — frontend (serves both avatar pages):
+
+npm --prefix frontend run dev
+
+Tab 3 — extraction pipeline (fully standalone):
+
+.\.venv\Scripts\python.exe -m uvicorn pipeline.app:app --port 8001
+
+Tab 1 — lecture backend (port 8002)
+
+.\.venv\Scripts\python.exe -m uvicorn lecture.app:app --port 8002
+
+Tab 2 — frontend (port 5173)
+
+npm --prefix frontend run dev
+Then:
+
+URL	What
+http://localhost:5173/	Pipeline 1 — authored .vrma + fingerspelling
+http://localhost:5173/signer.html	Pipeline 2 — your 9 captured signs
+http://localhost:8001/	Pipeline 3 — video → skeleton dashboard
+
+Two shortcuts worth knowing: signer.html needs no backend, so if that's all you're working on, skip Tab 1 entirely — Vite alone is enough. And npm run dev:all starts the backend and frontend together in one tab, with Ctrl+C stopping both (I verified the module path it uses actually resolves).
+
+If Zed's terminal says npm isn't recognised, Node is installed but off that shell
