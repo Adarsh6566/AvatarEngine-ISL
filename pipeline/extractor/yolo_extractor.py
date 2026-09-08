@@ -14,6 +14,7 @@ from typing import List
 from .base import Extractor, Space
 from .device import select_device
 from .mediapipe_extractor import _dummy_stream
+from . import face as face_capture
 from .schemas import CANONICAL_JOINTS, JointSpec, SkeletonFrame, SkeletonMeta, SkeletonStreamDict
 
 try:
@@ -35,6 +36,11 @@ class YoloExtractor(Extractor):
         return CANONICAL_JOINTS
 
     def extract(self, video_path: Path, space: Space = "world") -> SkeletonStreamDict:
+        face_reason = face_capture.unavailable_reason()
+        capture_face = face_reason is None
+        if not capture_face:
+            print(f"[face] expression capture off - {face_reason}")
+
         # try ultralytics if present
         try:
             from ultralytics import YOLO  # type: ignore
@@ -100,6 +106,7 @@ class YoloExtractor(Extractor):
                 h, w = frame.shape[:2]
                 res = model(frame, verbose=False, device=device)[0]
                 joints = {j.name: None for j in CANONICAL_JOINTS}
+                head_points = []
                 if res.keypoints is not None and len(res.keypoints) > 0:
                     # take largest person (first)
                     kpts = res.keypoints.xy[0].cpu().numpy()  # (17,2)
@@ -111,6 +118,8 @@ class YoloExtractor(Extractor):
                         if conf < CONF_THRESH:
                             return None
                         return (float(kpts[i][0]), float(kpts[i][1]), 0.0, conf)
+
+                    head_points = [kp(k) for k in range(5)]
 
                     # only set if visible — prevents hallucinated legs when cropped/occluded
                     for k, idx in [("head",0),("lShoulder",5),("rShoulder",6),("lElbow",7),("rElbow",8),("lWrist",9),("rWrist",10),("lHip",11),("rHip",12),("lKnee",13),("rKnee",14),("lAnkle",15),("rAnkle",16)]:
@@ -156,7 +165,18 @@ class YoloExtractor(Extractor):
                         rw = joints["rWrist"]  # type: ignore
                         joints["rHand"] = (rw[0], rw[1] + 4, 0, 0.5)
 
-                frames.append(SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints))
+                # COCO keypoints 0-4 are nose, eyes and ears — enough to size the
+                # face crop the landmarker needs.
+                face_values = None
+                if capture_face and head_points:
+                    try:
+                        face_values = face_capture.blendshapes(frame, head_points)
+                    except Exception as e:
+                        if idx == 0:
+                            print(f"[face] disabled after error: {e}")
+                        capture_face = False
+
+                frames.append(SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints, face=face_values))
                 if joints.get("lWrist") is not None:
                     prev_lWrist = joints["lWrist"]
                 if joints.get("rWrist") is not None:

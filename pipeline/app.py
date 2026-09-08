@@ -293,9 +293,30 @@ def get_output(name: str):
     return FileResponse(path)
 
 
+class _NoCacheStatic(StaticFiles):
+    """StaticFiles that refuses to be cached.
+
+    Plain StaticFiles sends ETag and Last-Modified but no Cache-Control, which
+    leaves the browser free to apply heuristic caching and serve app.js or
+    index.html from memory WITHOUT revalidating. On a dashboard whose whole
+    purpose is inspecting what the pipeline just produced, that shows stale
+    frontend code against fresh data and looks exactly like the new feature
+    silently not working — which is precisely how it presented: expression
+    capture was landing in every frame while the page rendering it was an old
+    copy that knew nothing about faces.
+
+    Development tool, local only, files are tiny: never cache.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+        return response
+
+
 # Serve frontend at /  (must be mounted after /api routes)
 if FRONTEND_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+    app.mount("/", _NoCacheStatic(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
 
 # Allow `python -m pipeline.app`

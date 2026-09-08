@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import List
 
 from .base import Extractor, Space
+from . import face as face_capture
 from .schemas import CANONICAL_JOINTS, JointSpec, SkeletonFrame, SkeletonMeta, SkeletonStreamDict
 
 try:
@@ -153,6 +154,13 @@ def _dummy_stream(video_path: Path, fps: float, frame_count: int, space: Space) 
 
 
 def _try_mediapipe_tasks_extract(video_path: Path, space: Space, fps: float) -> SkeletonStreamDict | None:
+    # Face capture is optional: if the model is missing the body and hands still
+    # extract and every frame simply carries no face. Reported once, not per frame.
+    face_reason = face_capture.unavailable_reason()
+    capture_face = face_reason is None
+    if not capture_face:
+        print(f"[face] expression capture off - {face_reason}")
+
     """Real tasks extraction using PoseLandmarker + HandLandmarker (mediapipe 0.10 tasks).
 
     Downloads .task bundles on first run to pipeline/.models. Returns None only if
@@ -259,9 +267,9 @@ def _try_mediapipe_tasks_extract(video_path: Path, space: Space, fps: float) -> 
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
         joints = {j.name: None for j in CANONICAL_JOINTS}
+        pose_lms = None
         try:
             pose_res = pose_landmarker.detect(mp_image)
-            pose_lms = None
             pose_world_lms = None
             if pose_res.pose_landmarks:
                 pose_lms = pose_res.pose_landmarks[0]
@@ -498,7 +506,21 @@ def _try_mediapipe_tasks_extract(video_path: Path, space: Space, fps: float) -> 
         except Exception as e:
             print(f"[mediapipe] frame {idx} error: {e}")
 
-        frames.append(SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints))
+        # Facial expression from this same frame. MediaPipe's pose landmarks 0-10
+        # are all face points (nose, eyes, ears, mouth corners), which is enough
+        # to size a crop — the face is ~10% of frame height and the landmarker
+        # cannot find it in the full image without one.
+        face_values = None
+        if capture_face and pose_lms is not None:
+            try:
+                head_points = [(float(pose_lms[i].x) * w, float(pose_lms[i].y) * h) for i in range(11)]
+                face_values = face_capture.blendshapes(frame, head_points)
+            except Exception as e:
+                if idx == 0:
+                    print(f"[face] disabled after error: {e}")
+                capture_face = False
+
+        frames.append(SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints, face=face_values))
         idx += 1
 
     cap.release()
@@ -533,6 +555,13 @@ def _try_mediapipe_tasks_extract(video_path: Path, space: Space, fps: float) -> 
 
 
 def _try_mediapipe_legacy_extract(video_path: Path, space: Space, fps: float) -> SkeletonStreamDict | None:
+    # Face capture is optional: if the model is missing the body and hands still
+    # extract and every frame simply carries no face. Reported once, not per frame.
+    face_reason = face_capture.unavailable_reason()
+    capture_face = face_reason is None
+    if not capture_face:
+        print(f"[face] expression capture off - {face_reason}")
+
     try:
         import mediapipe as mp  # type: ignore
 
@@ -574,10 +603,16 @@ def _try_mediapipe_legacy_extract(video_path: Path, space: Space, fps: float) ->
         h, w = frame.shape[:2]
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         joints = {j.name: None for j in CANONICAL_JOINTS}
+        # Image-space landmarks for the face crop. Deliberately NOT the world
+        # landmarks also available here: those are hip-centred metres and cannot
+        # index into a picture.
+        pose_lms = None
 
         try:
             if holistic is not None:
                 res = holistic.process(rgb)  # type: ignore
+                if getattr(res, "pose_landmarks", None):
+                    pose_lms = res.pose_landmarks.landmark  # type: ignore
                 # pose world vs image
                 if space == "world" and res.pose_world_landmarks:
                     lm = res.pose_world_landmarks.landmark  # type: ignore
@@ -711,7 +746,21 @@ def _try_mediapipe_legacy_extract(video_path: Path, space: Space, fps: float) ->
         except Exception:
             pass
 
-        frames.append(SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints))
+        # Facial expression from this same frame. MediaPipe's pose landmarks 0-10
+        # are all face points (nose, eyes, ears, mouth corners), which is enough
+        # to size a crop — the face is ~10% of frame height and the landmarker
+        # cannot find it in the full image without one.
+        face_values = None
+        if capture_face and pose_lms is not None:
+            try:
+                head_points = [(float(pose_lms[i].x) * w, float(pose_lms[i].y) * h) for i in range(11)]
+                face_values = face_capture.blendshapes(frame, head_points)
+            except Exception as e:
+                if idx == 0:
+                    print(f"[face] disabled after error: {e}")
+                capture_face = False
+
+        frames.append(SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints, face=face_values))
         idx += 1
         mp_frames += 1
 

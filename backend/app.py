@@ -1,19 +1,34 @@
 import logging
 import time
 import uuid
+from pathlib import Path as _Path
+
+# .env is the pattern this repo already documents (.env.example) and already
+# gitignores, but nothing was loading it — so a key placed there was silently
+# ignored and only a real environment variable worked. Optional: if the package
+# is missing the app still starts and reads plain environment variables.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(_Path(__file__).resolve().parent.parent / ".env")
+except Exception:
+    pass
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 try:
     from language.translator import segment
+    from language import gloss_llm
     from schemas import Segment, TranslateRequest, TranslateResponse
     from config import get_cors_origins, get_rate_limit, get_log_level, load_config
 except ImportError:  # when run as `backend.app` from repo root
     from backend.language.translator import segment  # type: ignore[no-redef]
+    from backend.language import gloss_llm  # type: ignore[no-redef]
     from backend.schemas import Segment, TranslateRequest, TranslateResponse  # type: ignore[no-redef]
     from backend.config import get_cors_origins, get_rate_limit, get_log_level, load_config  # type: ignore[no-redef]
 
@@ -138,3 +153,67 @@ def translate_endpoint(request: TranslateRequest) -> TranslateResponse:
             for part in segments
         ],
     )
+
+# --- English -> ISL gloss, via a language model -----------------------------
+
+
+class GlossVocabEntry(BaseModel):
+    gloss: str = Field(max_length=64)
+    words: list[str] = Field(default_factory=list, max_length=32)
+
+
+class GlossRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+    # The CALLER supplies its vocabulary. The signer page owns the sign library
+    # (frontend/signer/SignLibrary.ts) and a second copy here would be a second
+    # thing to keep correct — the lecture service avoids the same trap for the
+    # same reason.
+    vocabulary: list[GlossVocabEntry] = Field(min_length=1, max_length=512)
+
+
+class GlossResponse(BaseModel):
+    glosses: list[str]
+    # "llm" when the model produced this, "unavailable" when the caller should
+    # use its own matcher instead. Named so the client can report honestly
+    # rather than silently presenting a fallback as a translation.
+    source: str
+
+
+@app.post("/gloss", response_model=GlossResponse)
+def gloss_endpoint(request: GlossRequest) -> GlossResponse:
+    """Translate English to a sequence of the caller's own glosses.
+
+    Returns source="unavailable" with no glosses when translation could not be
+    done — no key configured, network down, model unreachable or its reply
+    unusable. That is not an error condition: the client falls back to string
+    matching and keeps signing.
+    """
+    entries = [gloss_llm.VocabEntry(gloss=v.gloss, words=v.words) for v in request.vocabulary]
+    result = gloss_llm.translate(request.text, entries)
+    if result is None:
+        return GlossResponse(glosses=[], source="unavailable")
+    return GlossResponse(glosses=result, source="llm")
+
+
+class GlossBatchRequest(BaseModel):
+    # A lecture arrives as thousands of short segments. One request per segment
+    # would spend the whole prompt — mostly the vocabulary listing, identical
+    # every time — on each of them.
+    texts: list[str] = Field(min_length=1, max_length=64)
+    vocabulary: list[GlossVocabEntry] = Field(min_length=1, max_length=512)
+
+
+class GlossBatchResponse(BaseModel):
+    # One entry per input text, same order. Never shorter: a caller lining these
+    # up against timestamped segments must not have them shift.
+    results: list[list[str]]
+    source: str
+
+
+@app.post("/gloss/batch", response_model=GlossBatchResponse)
+def gloss_batch_endpoint(request: GlossBatchRequest) -> GlossBatchResponse:
+    entries = [gloss_llm.VocabEntry(gloss=v.gloss, words=v.words) for v in request.vocabulary]
+    results = gloss_llm.translate_batch(request.texts, entries)
+    if results is None:
+        return GlossBatchResponse(results=[[] for _ in request.texts], source="unavailable")
+    return GlossBatchResponse(results=results, source="llm")

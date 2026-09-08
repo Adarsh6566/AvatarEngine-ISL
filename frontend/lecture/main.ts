@@ -10,6 +10,7 @@ import {
   type SkeletonStreamFrame,
 } from '../skeleton/SkeletonStream';
 import { matchSigns, type SignMatch } from '../signer/SignLibrary';
+import { translateTranscript } from './glossBatch';
 import { AVATAR, fitToChrome } from '../avatar/framing/fitToChrome';
 import { hideLegs } from '../avatar/framing/hideLegs';
 import type { VRM } from '@pixiv/three-vrm';
@@ -252,7 +253,9 @@ interface Segment {
 
 interface Planned {
   readonly segment: Segment;
-  readonly matches: SignMatch[];
+  // Not readonly: the string matcher fills this immediately, then batch
+  // translation replaces it as better answers arrive.
+  matches: SignMatch[];
   readonly row: HTMLElement;
   fired: boolean;
 }
@@ -332,8 +335,60 @@ fileInput.addEventListener('change', () => {
   meta.note.textContent = '';
 });
 
+
+/**
+ * Improve the matcher's results with real translation, in the background.
+ *
+ * Runs AFTER the transcript is already rendered and playable. Every row starts
+ * with whatever the string lookup found, and rows are replaced in place as
+ * batches come back — so the page is usable from the first frame and simply
+ * gets better, rather than showing a spinner while a language model works
+ * through two and a half thousand segments.
+ */
+let upgradeRun: AbortController | null = null;
+
+async function upgradeWithTranslation(): Promise<void> {
+  upgradeRun?.abort(); // a new transcript supersedes any run still going
+  const run = new AbortController();
+  upgradeRun = run;
+
+  const texts = plan.map((p) => p.segment.text);
+  if (!texts.length) return;
+
+  await translateTranscript(
+    texts,
+    (from, batch) => {
+      batch.forEach((matches, i) => {
+        const item = plan[from + i];
+        if (!item) return;
+        // Only replace when translation actually found something. An empty
+        // result may be correct, but it may equally be a model that gave up on
+        // that sentence — and discarding a match the string lookup already had
+        // would make the page worse for no reason.
+        if (matches.length === 0) return;
+        item.matches = matches;
+        const signs = item.row.querySelector('.seg__signs');
+        if (signs) signs.innerHTML = matches.map((m) => `<b>${m.entry.gloss}</b>`).join(' ');
+      });
+      // The coverage figure is the honest measure of this pipeline, so it has to
+      // track the upgrade rather than report the matcher's number forever.
+      const signable = plan.filter((p) => p.matches.length).length;
+      meta.cov.textContent = plan.length
+        ? `${signable} / ${plan.length} segments (${Math.round((signable / plan.length) * 100)}%)`
+        : '–';
+    },
+    ({ done, total, improved }) => {
+      if (run.signal.aborted) return;
+      meta.note.textContent =
+        done < total ? `Translating ${done}/${total}…` : `Translated — ${improved} segments signable.`;
+    },
+    run.signal,
+  );
+}
+
 function applyTranscript(data: any): void {
   plan = render(data.segments as Segment[]);
+  void upgradeWithTranslation();
   const signable = plan.filter((p) => p.matches.length).length;
   meta.lang.textContent = `${data.language} (${data.language_probability})`;
   meta.dur.textContent = `${data.duration}s`;

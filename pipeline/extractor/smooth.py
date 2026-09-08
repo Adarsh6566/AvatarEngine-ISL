@@ -113,7 +113,8 @@ def smooth_stream(stream: SkeletonStreamDict) -> SkeletonStreamDict:
             if v is not None:
                 # keep X,Y as smoothed, force Z toward 0 with 90% damping
                 out_joints[vname] = (v[0], v[1], v[2]*0.12, v[3])
-        new_frames.append(SkeletonFrame(index=f.index, timestamp=f.timestamp, joints=out_joints))
+        # Smoothing is positional; blendshapes pass through untouched.
+        new_frames.append(SkeletonFrame(index=f.index, timestamp=f.timestamp, joints=out_joints, face=f.face))
 
     # second pass: fill blurry-frame gaps (consecutive None) with linear interpolation
     # this makes abrupt re-appearances become smooth ramps over gap length
@@ -141,7 +142,7 @@ def smooth_stream(stream: SkeletonStreamDict) -> SkeletonStreamDict:
                     # need to copy joints dict (create new Frame)
                     new_joints = dict(jf.joints)
                     new_joints[joint_name] = interp
-                    new_frames[i0+g] = SkeletonFrame(index=jf.index, timestamp=jf.timestamp, joints=new_joints)
+                    new_frames[i0+g] = SkeletonFrame(index=jf.index, timestamp=jf.timestamp, joints=new_joints, face=jf.face)
 
     meta = stream.meta.model_copy()
     # tag estimator

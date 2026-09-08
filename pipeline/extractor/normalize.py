@@ -47,7 +47,10 @@ def to_view_space(stream: SkeletonStreamDict) -> SkeletonStreamDict:
             # flip Z for world to fix mirrored upper body (mediapipe left-handed vs Three right-handed)
             nz = ((rz - z) * scale if flip_z else (z - rz) * scale)
             joints[name] = (nx, ny, nz, c)
-        frames.append(SkeletonFrame(index=f.index, timestamp=f.timestamp, joints=joints))
+        # Carry the face through unchanged: these are blendshape coefficients,
+        # not coordinates, so nothing in a change of coordinate space applies
+        # to them — and dropping them here silently emptied every output.
+        frames.append(SkeletonFrame(index=f.index, timestamp=f.timestamp, joints=joints, face=f.face))
 
     # rebuild meta with view space label
     meta = stream.meta.model_copy()

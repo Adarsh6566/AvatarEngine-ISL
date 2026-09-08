@@ -456,6 +456,28 @@ async function createVrmRenderer(host){
   const dl = new THREE.DirectionalLight(0xffffff, 1.4); dl.position.set(1,2,2); scene.add(dl);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0.9, 0); controls.enableDamping=true; controls.dampingFactor=0.08;
+
+  // Body framing puts the head at roughly 25 screen pixels in this pane, which
+  // is smaller than the movement being displayed — a brow raise or a mouth
+  // shape simply is not resolvable there, so captured expression looked like no
+  // expression at all. The close-up exists so the face can be judged; the body
+  // view stays the default because that is what the sign itself is read from.
+  const FRAMING = {
+    body: { pos: [0, 1.0, 3.0], target: [0, 0.9, 0] },
+    face: { pos: [0, 1.52, 0.72], target: [0, 1.5, 0] },
+  };
+  let framing = 'body';
+  function setFraming(mode){
+    framing = mode;
+    const f = FRAMING[mode];
+    camera.position.set(...f.pos);
+    controls.target.set(...f.target);
+    controls.update();
+    const btn = document.getElementById('vrmFramingBtn');
+    if(btn) btn.textContent = mode === 'body' ? 'face' : 'body';
+  }
+  const framingBtn = document.getElementById('vrmFramingBtn');
+  if(framingBtn) framingBtn.addEventListener('click', ()=> setFraming(framing === 'body' ? 'face' : 'body'));
   controls.minDistance=1.2; controls.maxDistance=6; controls.update();
   new ResizeObserver(()=>{ const w=host.clientWidth||640, h=host.clientHeight||host.clientWidth||640; camera.aspect=w/h; camera.updateProjectionMatrix(); renderer.setSize(w,h); }).observe(host);
 
@@ -543,6 +565,105 @@ async function createVrmRenderer(host){
     vrm.humanoid.update();
   }
 
+
+  // --- facial expression ----------------------------------------------------
+  //
+  // The extractor writes 52 ARKit-style blendshape coefficients per frame; this
+  // model carries VRoid's 57 Fcl_* morph targets. The two vocabularies do not
+  // correspond one-to-one, so a coefficient is spread across the morphs that
+  // together produce the same visible movement, each with its own gain.
+  //
+  // Gains above 1 are deliberate. The captured face is ~120px of a 1080p frame,
+  // which under-reads amplitude — a real brow raise lands around 0.6 rather
+  // than saturating — while the Fcl_ morphs are authored so that 1.0 is a full
+  // stylised expression. Without the lift, a clearly-signed question marker
+  // renders as a faint twitch.
+  //
+  // Left/right pairs each carry HALF the gain, so that summing them averages:
+  // mouthSmileLeft and mouthSmileRight are one expression measured twice, not
+  // two expressions, and adding them at full gain saturated Fcl_MTH_Joy at 1.0
+  // on any ordinary smile — every smile then looked identical and maximal.
+  // Contributions from genuinely different shapes (inner vs outer brow raise)
+  // still sum, because those really do stack.
+  const FACE_MAP = {
+    browInnerUp:      [['Fcl_BRW_Surprised', 1.2]],
+    browOuterUpLeft:  [['Fcl_BRW_Surprised', 0.3]],
+    browOuterUpRight: [['Fcl_BRW_Surprised', 0.3]],
+    browDownLeft:     [['Fcl_BRW_Angry', 0.55]],
+    browDownRight:    [['Fcl_BRW_Angry', 0.55]],
+    mouthSmileLeft:   [['Fcl_MTH_Joy', 0.45], ['Fcl_EYE_Joy', 0.15]],
+    mouthSmileRight:  [['Fcl_MTH_Joy', 0.45], ['Fcl_EYE_Joy', 0.15]],
+    mouthFrownLeft:   [['Fcl_MTH_Sorrow', 0.45]],
+    mouthFrownRight:  [['Fcl_MTH_Sorrow', 0.45]],
+    mouthPucker:      [['Fcl_MTH_U', 1.0]],
+    mouthFunnel:      [['Fcl_MTH_O', 1.0]],
+    jawOpen:          [['Fcl_MTH_A', 1.3]],
+    eyeBlinkLeft:     [['Fcl_EYE_Close_L', 1.0]],
+    eyeBlinkRight:    [['Fcl_EYE_Close_R', 1.0]],
+    eyeSquintLeft:    [['Fcl_EYE_Joy_L', 0.8]],
+    eyeSquintRight:   [['Fcl_EYE_Joy_R', 0.8]],
+    eyeWideLeft:      [['Fcl_EYE_Surprised', 0.3]],
+    eyeWideRight:     [['Fcl_EYE_Surprised', 0.3]],
+  };
+
+  // morph name -> [{mesh, index}], built once. A merged VRoid head can expose
+  // the same target on more than one primitive, so every hit is kept.
+  let morphIndex = null;
+  function buildMorphIndex(root){
+    const map = new Map();
+    root.traverse((o)=>{
+      const dict = o.morphTargetDictionary;
+      if(!dict || !o.morphTargetInfluences) return;
+      for(const [name, i] of Object.entries(dict)){
+        if(!map.has(name)) map.set(name, []);
+        map.get(name).push({mesh:o, index:i});
+      }
+    });
+    return map;
+  }
+
+  // Smoothed toward the target rather than snapped. Capture is per-frame and
+  // noisy at this face size; without damping the brows flicker between frames
+  // in a way the signer never did.
+  const FACE_SMOOTHING = 0.35;
+  let faceCurrent = {};
+  let faceTarget = {};
+
+  function setFaceBlendshapes(bs){
+    if(!vrm) return;
+    if(!morphIndex) morphIndex = buildMorphIndex(vrm.scene);
+    const next = {};
+    if(bs){
+      for(const [arkit, targets] of Object.entries(FACE_MAP)){
+        const v = bs[arkit];
+        if(!(v > 0)) continue;
+        for(const [morph, gain] of targets){
+          next[morph] = Math.min(1, (next[morph] || 0) + v * gain);
+        }
+      }
+    }
+    faceTarget = next;
+  }
+
+  // Applied AFTER vrm.update(), which is what makes this work at all:
+  // expressionManager.update() rewrites every morph influence it owns from the
+  // expression weights, so anything written before it is discarded on the way
+  // to the renderer.
+  function applyFaceMorphs(){
+    if(!vrm || !morphIndex) return;
+    const names = new Set([...Object.keys(faceCurrent), ...Object.keys(faceTarget)]);
+    for(const name of names){
+      const to = faceTarget[name] || 0;
+      const from = faceCurrent[name] || 0;
+      const v = from + (to - from) * FACE_SMOOTHING;
+      if(v < 0.001 && to === 0){ delete faceCurrent[name]; }
+      else { faceCurrent[name] = v; }
+      const slots = morphIndex.get(name);
+      if(!slots) continue;
+      for(const {mesh, index} of slots) mesh.morphTargetInfluences[index] = faceCurrent[name] || 0;
+    }
+  }
+
   const loader = new GLTFLoader();
   loader.register(p=> new VRMLoaderPlugin(p));
   loader.load('/models/AvatarSample_C.vrm', (gltf)=>{
@@ -570,12 +691,31 @@ async function createVrmRenderer(host){
     }
     return out;
   }
-  function setStream(s){ streamRef=s; setFrameLerp(0,0); }
-  function setFrame(idx){ const j=frameJoints(idx,0); if(j) applyPose(j); }
-  function setFrameLerp(idx,alpha){ const j=frameJoints(idx,alpha); if(j) applyPose(j); }
+  function frameFace(idx){
+    if(!streamRef) return null;
+    const fr=streamRef.frames, n=fr.length; if(!n) return null;
+    // Nearest frame that actually HAS a face. Detection drops out on blur and
+    // head turns, and holding the last real expression reads far better than
+    // snapping to neutral for the frames in between.
+    for(let k=0;k<8;k++){
+      const a=fr[Math.min(n-1,Math.max(0,idx-k))];
+      if(a && a.face) return a.face;
+    }
+    return null;
+  }
+  function setStream(s){ streamRef=s; morphIndex=null; faceCurrent={}; faceTarget={}; setFrameLerp(0,0); }
+  function setFrame(idx){ const j=frameJoints(idx,0); if(j) applyPose(j); setFaceBlendshapes(frameFace(idx)); }
+  function setFrameLerp(idx,alpha){ const j=frameJoints(idx,alpha); if(j) applyPose(j); setFaceBlendshapes(frameFace(idx)); }
 
-  (function loop(){ requestAnimationFrame(loop); controls.update(); if(vrm) vrm.update(1/60); renderer.render(scene,camera); })();
+  (function loop(){ requestAnimationFrame(loop); controls.update(); if(vrm) vrm.update(1/60); applyFaceMorphs(); renderer.render(scene,camera); })();
 
-  vrmInst = { setStream, setFrame, setFrameLerp, get stream(){return streamRef}, set stream(s){ setStream(s); } };
+  vrmInst = { setStream, setFrame, setFrameLerp, get stream(){return streamRef}, set stream(s){ setStream(s); },
+    // Debug handle. This is a development dashboard, and being able to push a
+    // stream at the avatar from the console — or read back which morphs a frame
+    // actually drove — is how you tell "the expression is wrong" apart from
+    // "the expression never arrived".
+    _debug: { get faceTarget(){return faceTarget}, get faceCurrent(){return faceCurrent},
+              get morphs(){return morphIndex}, setFaceBlendshapes } };
+  window.__vrmViewer = vrmInst;
   return vrmInst;
 }

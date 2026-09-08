@@ -57,6 +57,9 @@ def _load_hand_landmarker():
         return None, None
 
 
+from . import face as face_capture
+
+
 class HybridYoloMediapipeExtractor(Extractor):
     @property
     def name(self) -> str:
@@ -91,6 +94,14 @@ class HybridYoloMediapipeExtractor(Extractor):
 
         # hand landmarker (optional — body still works without hands)
         hand_landmarker, mp = _load_hand_landmarker()
+
+        # Face capture is optional in exactly the same way: if the model is not
+        # present the body and hands still extract, and every frame simply
+        # carries no face. Reported once rather than per frame.
+        face_reason = face_capture.unavailable_reason()
+        capture_face = face_reason is None
+        if not capture_face:
+            print(f"[face] expression capture off — {face_reason}")
 
         try:
             # force model path inside pipeline/ (not ~/.ultralytics)
@@ -136,6 +147,7 @@ class HybridYoloMediapipeExtractor(Extractor):
                 h, w = frame.shape[:2]
                 res = model(frame, verbose=False, device=device)[0]
                 joints = {j.name: None for j in CANONICAL_JOINTS}
+                head_points = []
                 if res.keypoints is not None and len(res.keypoints) > 0:
                     kpts = res.keypoints.xy[0].cpu().numpy()  # type: ignore
                     confs = res.keypoints.conf[0].cpu().numpy() if hasattr(res.keypoints, "conf") else [1.0] * 17  # type: ignore
@@ -145,6 +157,11 @@ class HybridYoloMediapipeExtractor(Extractor):
                         if conf < CONF_THRESH:
                             return None
                         return (float(kpts[i][0]), float(kpts[i][1]), 0.0, conf)
+
+                    # COCO 0-4 are nose, eyes and ears. Kept in pixels for the
+                    # face crop below — the canonical joints only carry "head",
+                    # which is one point and cannot size a crop on its own.
+                    head_points = [kp(i) for i in range(5)]
 
                     for k, ci in [("head", 0), ("lShoulder", 5), ("rShoulder", 6), ("lElbow", 7), ("rElbow", 8), ("lWrist", 9), ("rWrist", 10), ("lHip", 11), ("rHip", 12), ("lKnee", 13), ("rKnee", 14), ("lAnkle", 15), ("rAnkle", 16)]:
                         v = kp(ci)
@@ -238,7 +255,21 @@ class HybridYoloMediapipeExtractor(Extractor):
                 if joints.get("rWrist") is not None:
                     prev_rWrist = joints["rWrist"]
 
-                frames.append(SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints))
+                # Facial expression from the same frame the body came from, so
+                # the two are aligned by construction rather than by a later
+                # synchronisation step.
+                face_values = None
+                if capture_face and head_points:
+                    try:
+                        face_values = face_capture.blendshapes(frame, head_points)
+                    except Exception as e:
+                        if idx == 0:
+                            print(f"[face] disabled after error: {e}")
+                        capture_face = False
+
+                frames.append(
+                    SkeletonFrame(index=idx, timestamp=idx / fps, joints=joints, face=face_values)
+                )
                 idx += 1
             cap.release()
             try:
