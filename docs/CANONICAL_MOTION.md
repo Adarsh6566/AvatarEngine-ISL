@@ -392,12 +392,30 @@ where the palm solution flips outright, but it cannot recover a palm angle the
 capture never saw: where the tracker is confidently wrong at a plausible rate,
 the repair passes it through.
 
-**The avatar's proportions do not match the signers.** Forearm 1.31×, full arm
-1.19×, against a torso that matches within 2%. Because retargeting copies
-rotations, the hand lands at the end of a longer limb: measured 0.11–0.16
-hips→head units too low at rest, which is what drives hands into the thighs.
-Unrelated to the averaging — it would affect a single take identically — and
-fixable with position-aware retargeting (two-bone IK), which is not built.
+**The avatar's proportions do not match the signers — now corrected at
+playback.** Measured against hip→head on the shipped clips: forearm **1.49×**,
+whole arm **1.32×**, on shoulders only **1.06×** wider. Because retargeting
+copies rotations, the hand lands at the end of a longer limb, somewhere the
+signer's hand never was.
+
+On `we`, where the arms cross in front of the chest, that was visible as the
+hands passing through each other: the signers' wrists close to 0.119 hip→head
+units and the rotation-only avatar carried them on to **0.048**, overlapping for
+21 frames of 59.
+
+`frontend/avatar/animation/armIK.ts` now solves the elbow instead of copying it.
+The shoulder and the wrist are the constraints, the elbow is placed by the
+cosine rule, and the observed elbow picks the swivel so the arm still bends the
+way the signer's did. Each hand ends up where it was relative to its own
+shoulder; on `we` the closest approach becomes 0.138 and no frame overlaps.
+
+This is a *playback* fix and lives in the frontend, not in this pipeline — the
+clips are unchanged, and the same clips on a differently-proportioned avatar get
+that avatar's solution. Pass `?ik=0` to compare against the old behaviour.
+
+Still open: the capture under-elevates the arms (above), which IK cannot
+recover — it faithfully reaches the position that was measured, including when
+that position is too low.
 
 ---
 
