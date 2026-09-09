@@ -16,6 +16,12 @@ export interface SignEntry {
   readonly words: readonly string[];
 }
 
+/**
+ * YOU_PLURAL deliberately does NOT claim the bare word 'you'. ISL marks number
+ * on pronouns, and the clip captured here is the plural sweep; firing it on
+ * singular 'you' would sign the wrong word. The singular has not been recorded
+ * yet, so 'you' on its own is skipped rather than signed incorrectly.
+ */
 export const SIGN_LIBRARY: readonly SignEntry[] = [
   { gloss: 'HELLO',          path: '/skeleton/hello.json',           words: ['hello', 'hi', 'hey'] },
   { gloss: 'ALRIGHT',        path: '/skeleton/alright.json',        words: ['alright', 'okay', 'ok'] },
@@ -26,6 +32,9 @@ export const SIGN_LIBRARY: readonly SignEntry[] = [
   { gloss: 'HOW_ARE_YOU',    path: '/skeleton/how_are_you.json',    words: ['how are you', 'how are u', 'howdy'] },
   { gloss: 'THANK_YOU',      path: '/skeleton/thank_you.json',      words: ['thank you', 'thanks', 'thankyou', 'thank u'] },
   { gloss: 'PLEASED',        path: '/skeleton/pleased.json',        words: ['pleased', 'nice to meet you', 'glad'] },
+  { gloss: 'WE',             path: '/skeleton/we.json',             words: ['we', 'us', 'our', 'ours'] },
+  { gloss: 'YOU_PLURAL',     path: '/skeleton/you_plural.json',     words: ['you all', 'all of you', 'you people', 'y all', 'yall'] },
+  { gloss: 'THEY',           path: '/skeleton/they.json',           words: ['they', 'them', 'their', 'theirs'] },
 ];
 
 /** One recognised sign in a sentence, with the text that selected it. */
@@ -73,7 +82,13 @@ export function matchSigns(text: string): SignMatch[] {
     if (!matched) i += 1;
   }
 
-  return out;
+  // Collapse a sign that immediately repeats itself. Pronouns made this real:
+  // "they told them about their work" selects THEY three times from three
+  // different words, which performs the sign three times over for one clause
+  // and, in the lecture pipeline, spends three sign-durations on a segment that
+  // may be shorter than one. Distinct signs either side of a repeat are kept,
+  // so "we thank you, we begin" still signs WE twice.
+  return out.filter((m, i) => i === 0 || m.entry !== out[i - 1].entry);
 }
 
 /** Every written form the library understands, for the UI hint. */
