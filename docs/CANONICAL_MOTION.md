@@ -193,13 +193,39 @@ enforcement, not before. Enforcing lengths rescales each knuckle independently
 from the hand, which swings the index→little vector the palm's roll is measured
 against and put the flip straight back — 33°/frame became 171° again.
 
-**The fingers need their own test.** Stabilising the palm says nothing about
-articulation. With the hand frame divided out, single finger bones were still
-measured snapping **178.9° between frames**, 6.1% of them above 30°/frame — which
-is what reads as fingers moving on their own and crossing into each other. Each
-bone therefore gets the same rate test against its own direction in the hand
-frame, at **700°/s**: rapid finger tapping tops out near 800°/s and signing is
-not tapping. Cost is 0.7% of articulation range.
+**The fingers need their own test, and a different one.** Stabilising the palm
+says nothing about articulation. With the hand frame divided out, single finger
+bones were still measured snapping **178.9° between frames**, 6.1% of them above
+30°/frame — which is what reads as fingers moving on their own and crossing into
+each other. Each bone gets a rate ceiling of **700°/s** against its own direction
+in the hand frame: rapid finger tapping tops out near 800°/s and signing is not
+tapping.
+
+But a finger is **slowed, not replaced**. The wrist's test discards a frame
+outright, because a flipped palm is a pose the hand never held and interpolating
+past it is the only honest option. A finger moving too fast is a different
+failure: the pose it is moving *toward* is usually right and only the speed is
+wrong. Discarding those frames threw the destination away — on `it` the hand
+opens hard over two frames and is then held, and rejecting the opening
+interpolated straight across the hold, leaving 0.38 / 0.41 straightness on the
+middle and ring fingers where every take shows 0.90 / 0.92. A slew limit turns
+toward the observed direction as fast as a finger can manage and no faster, so it
+arrives at the real pose and holds it.
+
+**Damping comes before the limit, not after.** The barycenter carries steps no
+take does, because warp membership changes between adjacent reference frames: on
+`it`, one bone turns 147° in a single frame immediately before the held pose. A
+Gaussian on directions ramps a step and leaves a plateau alone, which gives the
+limiter a slope to follow instead of a cliff it can never catch up with. Run the
+other way round, the limiter met the cliff first and was still climbing when the
+hold arrived. The width is the per-sign σ with a floor of 1.2 frames, since σ is
+chosen on whole-clip jitter and a single-frame step barely moves that.
+
+Swept together across eight signs, this pair is the operating point: widening the
+Gaussian erodes the peak (mean handshape error 0.048 → 0.063 at width 2.5), and
+loosening the rate ceiling to 1600°/s buys 0.007 of accuracy while doubling the
+worst finger rate to 64°/frame, which is the flailing the whole stage exists to
+remove.
 
 **An undetected hand is not a noisy one.** MediaPipe emits a joint whether or not
 it found one, so a hand it never saw comes back with every finger collapsed onto
@@ -211,10 +237,9 @@ at frame 0, which is where the first version anchored 15% of takes to a pose tha
 did not exist.
 
 Result across all seventeen signs: worst-case wrist rotation falls from **118–177°
-per frame to 27–36°**, worst-case finger swing from **94–179° to 27.6–30.1°**, and
-frames above the human limit go from 1.6–6.2% to **0.0%**. Median rotation is
-unchanged (2.7° → 2.9°), so ordinary motion passes through untouched, and finger
-range of motion went *up* rather than down.
+per frame to 12–28°**, worst-case finger swing from **94–179° to 11–28°**, and
+frames above the human limit go from 1.6–6.2% to **0.0%**. Finger range of motion
+went *up* rather than down.
 ---
 
 ## What is measured, and the results
@@ -237,26 +262,35 @@ alignment features in their own space would only prove they optimise themselves.
 
 | sign | takes | frames | σ | canonical | best take | gain | jitter (canon / takes) | range kept | hand frames repaired |
 |---|---|---|---|---|---|---|---|---|---|
-| she | 21 | 68 | 0.8 | 0.7751 | 0.8759 | **+11.5%** | 0.0154 / 0.0205 | 98% | 11% |
-| good_morning | 19 | 63 | 0.6 | 0.6585 | 0.7300 | **+9.8%** | 0.0128 / 0.0197 | 80% | 13% |
-| good_evening | 18 | 65 | 0.6 | 0.6899 | 0.7620 | **+9.5%** | 0.0143 / 0.0199 | 83% | 8% |
-| he | 20 | 65 | 0.0 | 0.7568 | 0.8328 | **+9.1%** | 0.0168 / 0.0202 | 97% | 11% |
-| we | 18 | 59 | 0.0 | 0.7342 | 0.8071 | **+9.0%** | 0.0261 / 0.0295 | 91% | 14% |
-| it | 20 | 54 | 0.0 | 0.8542 | 0.9366 | **+8.8%** | 0.0128 / 0.0161 | 75% | 12% |
-| you | 21 | 63 | 0.0 | 0.7701 | 0.8432 | **+8.7%** | 0.0159 / 0.0169 | 93% | 9% |
-| how_are_you | 21 | 81 | 0.0 | 0.7706 | 0.8405 | **+8.3%** | 0.0239 / 0.0265 | 89% | 11% |
-| i | 20 | 59 | 0.6 | 0.6721 | 0.7166 | **+6.2%** | 0.0141 / 0.0157 | 88% | 7% |
-| good_afternoon | 19 | 63 | 0.0 | 0.6600 | 0.7023 | **+6.0%** | 0.0192 / 0.0197 | 90% | 9% |
-| they | 21 | 68 | 0.0 | 0.8308 | 0.8836 | **+6.0%** | 0.0190 / 0.0219 | 91% | 16% |
-| you_plural | 18 | 72 | 1.4 | 0.7455 | 0.7853 | **+5.1%** | 0.0113 / 0.0209 | 83% | 5% |
-| pleased | 18 | 60 | 0.0 | 0.6221 | 0.6551 | **+5.0%** | 0.0173 / 0.0196 | 87% | 13% |
-| thank_you | 20 | 58 | 2.0 | 0.6518 | 0.6825 | **+4.5%** | 0.0186 / 0.0233 | 87% | 11% |
-| alright | 18 | 61 | 0.8 | 0.6944 | 0.7231 | **+4.0%** | 0.0125 / 0.0217 | 85% | 6% |
-| hello | 19 | 56 | 0.6 | 0.7107 | 0.7369 | **+3.6%** | 0.0168 / 0.0168 | 87% | 13% |
-| good_night | 18 | 61 | 0.8 | 0.7505 | 0.7681 | **+2.3%** | 0.0165 / 0.0193 | 81% | 14% |
+| good_evening | 18 | 65 | 0.6 | 0.6810 | 0.7622 | **+10.7%** | 0.0169 / 0.0201 | 91% | 8% |
+| she | 21 | 68 | 1.0 | 0.7890 | 0.8727 | **+9.6%** | 0.0167 / 0.0216 | 98% | 11% |
+| good_morning | 19 | 63 | 0.0 | 0.6676 | 0.7309 | **+8.7%** | 0.0139 / 0.0184 | 82% | 13% |
+| it | 20 | 54 | 0.0 | 0.8664 | 0.9429 | **+8.1%** | 0.0135 / 0.0157 | 79% | 12% |
+| he | 20 | 65 | 0.0 | 0.7675 | 0.8334 | **+7.9%** | 0.0140 / 0.0202 | 101% | 11% |
+| we | 18 | 59 | 0.0 | 0.7396 | 0.8031 | **+7.9%** | 0.0284 / 0.0297 | 92% | 14% |
+| how_are_you | 21 | 81 | 0.0 | 0.7863 | 0.8363 | **+6.0%** | 0.0210 / 0.0260 | 89% | 11% |
+| you | 21 | 63 | 0.0 | 0.7939 | 0.8431 | **+5.8%** | 0.0107 / 0.0179 | 90% | 9% |
+| i | 20 | 59 | 0.4 | 0.6774 | 0.7156 | **+5.3%** | 0.0131 / 0.0168 | 90% | 7% |
+| good_afternoon | 19 | 63 | 0.0 | 0.6663 | 0.7002 | **+4.8%** | 0.0187 / 0.0202 | 92% | 9% |
+| alright | 18 | 61 | 0.8 | 0.6910 | 0.7231 | **+4.4%** | 0.0119 / 0.0210 | 84% | 6% |
+| pleased | 18 | 60 | 0.0 | 0.6260 | 0.6542 | **+4.3%** | 0.0184 / 0.0205 | 88% | 13% |
+| they | 21 | 68 | 0.0 | 0.8464 | 0.8815 | **+4.0%** | 0.0198 / 0.0214 | 94% | 16% |
+| you_plural | 18 | 72 | 1.4 | 0.7615 | 0.7835 | **+2.8%** | 0.0118 / 0.0211 | 84% | 5% |
+| thank_you | 20 | 58 | 2.0 | 0.6623 | 0.6790 | **+2.5%** | 0.0188 / 0.0249 | 89% | 11% |
+| hello | 19 | 56 | 0.6 | 0.7255 | 0.7359 | **+1.4%** | 0.0163 / 0.0170 | 88% | 13% |
+| good_night | 18 | 61 | 0.6 | 0.7625 | 0.7658 | **+0.4%** | 0.0171 / 0.0190 | 84% | 14% |
 
 Every sign beats its own best take. Finger jitter is at or below the take median
-everywhere. 80–91% of finger range of motion is retained.
+everywhere. 79–101% of finger range of motion is retained — `he` above 100%
+because rotation averaging can hold a handshape the median take does not.
+
+Gains are lower than an earlier build reported, and that is the trade this
+version takes deliberately. The score measures how well one sequence represents
+the set; it does not ask whether the pose is a handshape anyone can make. Where
+the two disagree — on the frames a sign is actually held — this version keeps the
+handshape. `good_night` at +0.4% and `hello` at +1.4% are the signs that paid
+most for it; both were already the least improved, because their takes agree
+closely enough that averaging has little to add over a good single performance.
 
 Gains are smaller than they were before the hand work, and that is the expected
 direction: the baseline moved. Both the canonical and the "best single take" it

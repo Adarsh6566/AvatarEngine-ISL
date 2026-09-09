@@ -21,12 +21,19 @@ the ambiguous solve. Both are interpolated across the bad frames from the
 nearest frames on either side that the rate test accepts, and both are
 interpolated as rotations, never as positions.
 
-Why this and not more smoothing: the pipeline already despikes with a 3-frame
-median and smooths with a Gaussian, and the artefact survives both. A median
-cannot fix a flip that persists for two frames, and a Gaussian averages the
-flipped pose into its neighbours instead of discarding it — widening the window
-spreads the error rather than removing it. The rate test is the only stage that
-asks whether a frame is physically possible at all.
+Why this and not the build chain's own smoothing: those stages work on
+positions, and a hand is the one place they cannot go. A per-axis median across
+three frames is not a pose any hand held, and both the median and the Gaussian
+shorten a finger toward its knuckle — measured on `it`, they took the four
+fingers from 0.98/0.98/0.99/0.98 straightness down to 0.56/0.30/0.31/0.07, a
+fist where every take shows an open hand. The equivalent damping happens here
+instead, on directions, where length is untouched by construction.
+
+The wrist and the fingers then fail differently and are treated differently. A
+flipped palm is a pose the hand never held, so the frame is discarded and
+interpolated past. A finger moving too fast is usually moving toward the RIGHT
+pose at the wrong speed, so it is slowed rather than replaced — discarding those
+frames threw away the very pose the sign holds.
 """
 
 from __future__ import annotations
@@ -47,6 +54,12 @@ MAX_DEG_PER_S = 900.0
 # frame can hold the palm perfectly steady and still snap one finger 178
 # degrees, which is what the first version of this module let through.
 MAX_FINGER_DEG_PER_S = 700.0
+
+# Floor on the hand's rotation-space smoothing width, in frames. The barycenter
+# steps between adjacent reference frames wherever warp membership changes, and
+# that is present even where the per-sign width comes out at 0 — which is chosen
+# on whole-clip jitter, a statistic a single-frame step barely moves.
+MIN_HAND_SMOOTH = 1.2
 
 # A take whose hand could not be solved for most of its frames is not a noisier
 # input, it is a wrong one — the same reasoning the dropout screen already
@@ -171,6 +184,41 @@ def _slerp_vec(a: np.ndarray, b: np.ndarray, u: float) -> np.ndarray:
     return (np.sin((1 - u) * theta) / s) * a + (np.sin(u * theta) / s) * b
 
 
+def _gaussian(width: float, n: int) -> np.ndarray:
+    r = max(1, int(round(3 * width)))
+    r = min(r, max(1, n - 1))
+    k = np.exp(-0.5 * (np.arange(-r, r + 1) / width) ** 2)
+    return k / k.sum()
+
+
+def _smooth_unit(x: np.ndarray, width: float) -> np.ndarray:
+    """Gaussian-smooth a track of unit vectors, renormalising after.
+
+    Smoothing DIRECTIONS is what makes this safe for a finger: the vectors
+    shorten as they average and are put back on the sphere, so the bone keeps
+    its length and only its aim moves. The same filter on positions shortens the
+    bone instead, which is how a curled finger appears where none was performed.
+    """
+    if width <= 0 or len(x) < 3:
+        return x
+    k = _gaussian(width, len(x))
+    r = len(k) // 2
+    pad = np.pad(x, [(r, r)] + [(0, 0)] * (x.ndim - 1), mode="edge")
+    out = sum(k[i] * pad[i : i + len(x)] for i in range(len(k)))
+    return out / (np.linalg.norm(out, axis=-1, keepdims=True) + 1e-12)
+
+
+def _smooth_quat(q: np.ndarray, width: float) -> np.ndarray:
+    """Same, for a quaternion track — signs aligned first so they cannot cancel."""
+    if width <= 0 or len(q) < 3:
+        return q
+    aligned = q.copy()
+    for t in range(1, len(aligned)):
+        if np.dot(aligned[t], aligned[t - 1]) < 0:
+            aligned[t] = -aligned[t]
+    return _smooth_unit(aligned, width)
+
+
 def _hand_chain(
     joint_names: tuple[str, ...], parents: dict[str, str | None], side: str
 ) -> list[tuple[int, int]]:
@@ -210,6 +258,8 @@ def stabilize_hands(
     fps: float,
     max_deg_per_s: float = MAX_DEG_PER_S,
     min_cond: float = 0.15,
+    smooth: float = 0.0,
+    source: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Rebuild hand orientation and handshape on physically impossible frames.
 
@@ -243,13 +293,20 @@ def stabilize_hands(
         if not chain:
             continue
 
-        R, origin, cond = _hand_frames(data, index, side)
+        # Hand geometry is read from `source` when one is given, so the caller can
+        # keep the positional filters off the fingers entirely and still have
+        # them attach to a hand root those filters DID move. `origin` and the
+        # chain walk below come from `out`, so the hand follows the smoothed arm
+        # while its shape comes from a copy the filters never touched.
+        src = data if source is None else source
+        R, _unused, cond = _hand_frames(src, index, side)
+        origin = data[:, index[f"{side}Hand"]]
         q = _to_quat(R)
         T = len(q)
 
         # Each finger bone as a unit direction in the hand's own frame, with the
         # arm and the palm's orientation both divided out, plus its length.
-        seg = np.stack([data[:, c, :] - data[:, p, :] for p, c in chain], axis=1)
+        seg = np.stack([src[:, c, :] - src[:, p, :] for p, c in chain], axis=1)
         length = np.linalg.norm(seg, axis=2)
         dirs = np.einsum("tji,tkj->tki", R, seg / (length[:, :, None] + 1e-12))
 
@@ -310,28 +367,57 @@ def stabilize_hands(
         # frame already divided out, single bones were still measured snapping
         # 178 degrees between frames, which is what reads as fingers moving on
         # their own and crossing into each other.
+        # Damp in rotation space, BEFORE the rate limit rather than after.
+        #
+        # The positional despike and Gaussian in the build chain cannot be used
+        # on a hand: a per-axis median across three frames is not a pose any hand
+        # held, and both shorten a finger toward its knuckle. Measured on `it`,
+        # they took the four fingers from 0.98/0.98/0.99/0.98 straightness down
+        # to 0.56/0.30/0.31/0.07 — a fist where every take shows an open hand.
+        # On directions, length is untouched by construction.
+        #
+        # Order matters, and this is where the artefact actually lives. The
+        # barycenter carries steps no take does, because warp membership changes
+        # between adjacent reference frames — on `it` one finger bone turns 147
+        # degrees in a single frame, immediately before the pose the sign holds.
+        # A Gaussian ramps a step while leaving a plateau alone, which is exactly
+        # the shape wanted here; the limiter afterwards then has a slope to
+        # follow rather than a cliff it can never catch up with. Run the other
+        # way round, the limiter met the cliff first and lagged so far behind
+        # that it was still climbing when the hold arrived.
+        width = max(smooth, MIN_HAND_SMOOTH)
+        q = _smooth_quat(q, width)
+        dirs = _smooth_unit(dirs, width)
+
+        # Fingers are SLOWED, not replaced. The wrist's test discards a frame
+        # outright because a flipped palm is a pose the hand never held, and
+        # interpolating past it is the only honest option. A finger moving too
+        # fast is a different failure: the pose it is moving TOWARD is usually
+        # right, and only the speed is wrong. Discarding those frames threw the
+        # destination away — on `it` the hand opens hard over two frames and is
+        # then held, and rejecting the opening interpolated across the hold,
+        # leaving 0.38 / 0.41 straightness on the middle and ring where every
+        # take shows 0.90 / 0.92 and the average itself had 0.98.
+        #
+        # A slew limit turns toward the observed direction at the fastest rate a
+        # finger can manage and no faster. It never invents a direction, and
+        # once the transient passes it arrives at exactly the observed pose and
+        # holds it.
         finger_limit = MAX_FINGER_DEG_PER_S / max(fps, 1e-6)
         finger_fixed = 0
         for k in range(len(chain)):
-            # Seeded on the same usable mask as the wrist, for the same reason:
-            # a collapsed bone has no direction to anchor against.
-            ok = np.zeros(T, dtype=bool)
-            ok[first] = True
-            anchor = first
-            for t in range(first + 1, T):
-                d = float(np.clip(np.dot(dirs[anchor, k], dirs[t, k]), -1.0, 1.0))
-                if usable[t] and np.degrees(np.arccos(d)) <= finger_limit * (t - anchor):
-                    ok[t] = True
-                    anchor = t
-            fine = np.flatnonzero(ok)
-            finger_fixed += int(T - ok.sum())
-            for a, b in zip(fine[:-1], fine[1:]):
-                for t in range(a + 1, b):
-                    dirs[t, k] = _slerp_vec(dirs[a, k], dirs[b, k], (t - a) / (b - a))
-            for t in range(int(fine[-1]) + 1, T):
-                dirs[t, k] = dirs[fine[-1], k]
-            for t in range(first):
+            for t in range(first):  # nothing to anchor to before the seed
                 dirs[t, k] = dirs[first, k]
+            for t in range(first + 1, T):
+                if not usable[t]:
+                    dirs[t, k] = dirs[t - 1, k]
+                    finger_fixed += 1
+                    continue
+                d = float(np.clip(np.dot(dirs[t - 1, k], dirs[t, k]), -1.0, 1.0))
+                ang = np.degrees(np.arccos(d))
+                if ang > finger_limit:
+                    dirs[t, k] = _slerp_vec(dirs[t - 1, k], dirs[t, k], finger_limit / ang)
+                    finger_fixed += 1
 
         # Rebuild the hand: walk the chain out from the wrist, each bone laid
         # along its repaired direction at the length the takes agree on.
