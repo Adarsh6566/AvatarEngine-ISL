@@ -53,7 +53,7 @@ takes at all — every one of their 63 recordings passed the quality screen.
 
 ## Pipeline
 
-Nine stages. Extraction is shared with the `pipeline/` dashboard; everything
+Ten stages. Extraction is shared with the `pipeline/` dashboard; everything
 from stage 4 lives in `offline/canonical/`.
 
 ### 1. Pose extraction — MediaPipe Tasks
@@ -124,6 +124,50 @@ positions independently does not preserve a skeleton: the mean of two elbows
 bent different ways sits closer to the shoulder than either, so forearms shrink
 on exactly the frames where takes disagree most.
 
+### 10. Hand repair
+MediaPipe solves each frame independently, and a hand that is moving or seen
+edge-on is genuinely ambiguous — palm-toward and palm-away fit the same
+silhouette. The tracker picks one per frame and oscillates, so the palm inverts
+between consecutive frames. Measured across the 253 takes, **4.5% of frames turn
+the hand more than 90° in a single 1/25 s step, and the worst reaches 179.6°.**
+
+No wrist can do that; pronation and supination peak near 1000°/s even in fast
+athletic movement. Frames claiming more than **900°/s** are treated as a failed
+solve. The hand's *position* is kept exactly as captured — it is carried by the
+arm, and the body pose estimate is the reliable channel. What is rebuilt is the
+hand's orientation and the direction of each finger bone in the hand's own
+frame, interpolated across the bad frames from the nearest accepted ones on
+either side.
+
+Three things this stage had to get right, each found by measurement:
+
+**It is not more smoothing.** Despiking and the Gaussian both run before it and
+neither removes the artefact — a median cannot fix a flip that lasts two frames,
+and a Gaussian averages the flipped pose into its neighbours instead of
+discarding it. The rate test is the only stage that asks whether a frame is
+physically possible at all.
+
+**Repairing the takes is not enough.** Cleaning all 21 inputs still left the
+barycenter swinging 177° between two frames: positions are averaged per joint,
+which does not preserve a rotation, so where warp membership changes between
+adjacent reference frames the mean hand frame jumps. The repair runs on the
+takes *and* on the result.
+
+**It interpolates rotations, never positions.** Lerping a repaired frame between
+two trusted ones collapsed a bone by 82% — the same failure this pipeline
+already documents for averaging elbows. Carrying the handshape as one unit
+direction per bone and re-applying median lengths makes bone length exact by
+construction.
+
+Ordering follows from that last point: this stage runs **after** bone-length
+enforcement, not before. Enforcing lengths rescales each knuckle independently
+from the hand, which swings the index→little vector the palm's roll is measured
+against and put the flip straight back — 33°/frame became 171° again.
+
+Result across all twelve signs: worst-case hand rotation falls from **118–177°
+per frame to 28–36°**, and frames above the human limit go from 1.6–6.2% to
+**0.0%**. Median rotation is unchanged (2.7° → 2.9°), so ordinary motion passes
+through untouched, and finger range of motion went *up* rather than down.
 ---
 
 ## What is measured, and the results
@@ -144,29 +188,33 @@ alignment features in their own space would only prove they optimise themselves.
 
 ### Results, all twelve signs
 
-| sign | takes | frames | σ | canonical | best take | gain | jitter (canon / takes) | range kept |
-|---|---|---|---|---|---|---|---|---|
-| we | 21 | 72 | 0.4 | 0.9213 | 1.0027 | **+8.1%** | 0.0187 / 0.0271 | 88% |
-| how_are_you | 21 | 81 | 0.6 | 0.7652 | 0.8269 | **+7.5%** | 0.0245 / 0.0270 | 88% |
-| good_evening | 21 | 71 | 0.0 | 0.8104 | 0.8732 | **+7.2%** | 0.0134 / 0.0194 | 83% |
-| hello | 21 | 61 | 0.0 | 0.8262 | 0.8808 | **+6.2%** | 0.0132 / 0.0164 | 85% |
-| you_plural | 21 | 72 | 0.6 | 0.8774 | 0.9343 | **+6.1%** | 0.0124 / 0.0215 | 83% |
-| they | 21 | 68 | 0.0 | 0.8384 | 0.8917 | **+6.0%** | 0.0178 / 0.0211 | 88% |
-| pleased | 20 | 63 | 0.0 | 0.7160 | 0.7611 | **+5.9%** | 0.0153 / 0.0182 | 84% |
-| good_morning | 21 | 64 | 0.6 | 0.7554 | 0.8011 | **+5.7%** | 0.0139 / 0.0179 | 84% |
-| good_afternoon | 22 | 63 | 0.6 | 0.7579 | 0.8018 | **+5.5%** | 0.0154 / 0.0202 | 84% |
-| good_night | 21 | 67 | 0.4 | 0.8723 | 0.9219 | **+5.4%** | 0.0175 / 0.0179 | 93% |
-| thank_you | 21 | 60 | 1.0 | 0.6889 | 0.7234 | **+4.8%** | 0.0198 / 0.0220 | 90% |
-| alright | 21 | 63 | 0.6 | 0.8819 | 0.9037 | **+2.4%** | 0.0154 / 0.0201 | 91% |
+| sign | takes | frames | σ | canonical | best take | gain | jitter (canon / takes) | range kept | hand frames repaired |
+|---|---|---|---|---|---|---|---|---|---|
+| we | 21 | 72 | 0.6 | 0.9010 | 0.9954 | **+9.5%** | 0.0179 / 0.0261 | 91% | 22% |
+| how_are_you | 21 | 81 | 0.6 | 0.7642 | 0.8407 | **+9.1%** | 0.0255 / 0.0271 | 88% | 11% |
+| good_morning | 21 | 64 | 0.0 | 0.7379 | 0.8019 | **+8.0%** | 0.0128 / 0.0193 | 81% | 19% |
+| you_plural | 21 | 72 | 0.6 | 0.8690 | 0.9355 | **+7.1%** | 0.0129 / 0.0201 | 85% | 12% |
+| they | 21 | 68 | 0.0 | 0.8246 | 0.8847 | **+6.8%** | 0.0181 / 0.0218 | 88% | 17% |
+| pleased | 20 | 63 | 0.0 | 0.7102 | 0.7614 | **+6.7%** | 0.0140 / 0.0185 | 83% | 19% |
+| good_evening | 21 | 71 | 0.0 | 0.8121 | 0.8691 | **+6.6%** | 0.0131 / 0.0199 | 88% | 19% |
+| hello | 21 | 61 | 0.0 | 0.8406 | 0.8941 | **+6.0%** | 0.0124 / 0.0170 | 84% | 18% |
+| good_afternoon | 22 | 63 | 0.0 | 0.7642 | 0.8055 | **+5.1%** | 0.0189 / 0.0200 | 92% | 17% |
+| good_night | 21 | 67 | 0.6 | 0.8960 | 0.9334 | **+4.0%** | 0.0180 / 0.0182 | 88% | 25% |
+| thank_you | 21 | 60 | 1.4 | 0.7053 | 0.7334 | **+3.8%** | 0.0193 / 0.0231 | 89% | 14% |
+| alright | 21 | 63 | 0.4 | 0.8884 | 0.9075 | **+2.1%** | 0.0179 / 0.0195 | 92% | 15% |
 
 Every sign beats its own best take. Finger jitter is at or below the take median
-everywhere. 83–93% of finger range of motion is retained.
+everywhere. 81–92% of finger range of motion is retained.
 
-`we` gains most in the whole set at +8.1%, and for the mirror of the reason
+`we` gains most in the whole set at +9.5%, and for the mirror of the reason
 `alright` gains least: its takes disagree more, so the average has more to add
-over any single performance. The three pronouns split 0.48–0.58, inside the band
+over any single performance. The three pronouns split 0.45–0.52, inside the band
 the greetings already occupy — the same unresolved question noted under
 *Known limitations*, not a new one.
+
+The last column is how much of the capture the hand repair (stage 8) had to
+rebuild. It runs at 11–25% per sign, and the worst single take in the set needed
+96%: one recording where the tracker never held a stable palm at all.
 
 `alright` gains least at +2.4% because its takes are the most consistent of the
 nine — when the recordings already agree, averaging has least to add over a good
@@ -276,7 +324,10 @@ within 8%, so this is lost in extraction, upstream of anything documented here.
 
 **Depth is the weakest channel.** MediaPipe's Z is inferred from a single view.
 Everything derived from depth — palm facing, how far a hand sits in front of the
-chest — inherits that.
+chest — inherits that. Stage 10 removes the *impossible* part of this, the frames
+where the palm solution flips outright, but it cannot recover a palm angle the
+capture never saw: where the tracker is confidently wrong at a plausible rate,
+the repair passes it through.
 
 **The avatar's proportions do not match the signers.** Forearm 1.31×, full arm
 1.19×, against a torso that matches within 2%. Because retargeting copies
@@ -325,5 +376,6 @@ contract in `offline/README.md`: the offline pipeline never edits runtime files.
 | `offline/canonical/extract.py` | video -> view-space take cache (stages 1-3) |
 | `offline/canonical/takes.py` | loading, quality screen, alignment features |
 | `offline/canonical/dba.py` | DTW, barycenter, despike, smoothing, bone lengths |
+| `offline/canonical/hands.py` | palm-flip detection and hand repair |
 | `offline/canonical/build.py` | orchestration, width selection, scoring, report |
 | `offline/output/canonical/report.json` | every metric, per sign |
