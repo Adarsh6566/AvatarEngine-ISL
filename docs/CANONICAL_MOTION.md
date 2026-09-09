@@ -1,6 +1,6 @@
 # Canonical motion: what the model is, what it measures, and why
 
-How the nine signs in `public/skeleton/` are produced from 190 recorded takes.
+How the twelve signs in `public/skeleton/` are produced from 253 recorded takes.
 
 Written to be checkable: every number here is emitted by
 `offline/canonical/build.py` into `offline/output/canonical/report.json`, and
@@ -22,7 +22,7 @@ The algorithm is **DTW Barycenter Averaging** (DBA, Petitjean et al. 2011).
 
 ### Why not a network
 
-The dataset is 190 sequences across 9 classes — roughly 21 takes per sign. A
+The dataset is 253 sequences across 12 classes — roughly 21 takes per sign. A
 generative motion model with enough capacity to represent signing would have
 more parameters than it has frames to fit, and would memorise the takes rather
 than generalise from them. Averaging has no parameters to overfit, so at this
@@ -38,15 +38,16 @@ motion prior becomes the better tool and this document should be revisited.
 
 | | |
 |---|---|
-| Source | ISL Greetings set, `Greetings_1of2` + `Greetings_2of2` |
-| Signs | 9 |
-| Takes | 190 total (21–22 per sign) |
+| Source | ISL Greetings set, `Greetings_1of2` + `Greetings_2of2`; Pronouns set, `Pronouns_2of2` |
+| Signs | 12 |
+| Takes | 253 total (21–22 per sign) |
 | Signers | at least 3 recording sessions, different people, different rooms |
 | Video | 1920×1080, 25 fps, 2–4 s per take |
 | Output | 59 joints/frame, 25 fps, `source_skeleton.v1 → view` |
 
 Takes per sign vary because the source folders do; `good_afternoon` has 22, the
-rest 21, and `pleased` ships 20 after one rejection.
+rest 21, and `pleased` ships 20 after one rejection. The three pronouns lost no
+takes at all — every one of their 63 recordings passed the quality screen.
 
 ---
 
@@ -141,13 +142,16 @@ the claim being made.
 Scoring stays in raw joint space even though alignment uses features. Grading
 alignment features in their own space would only prove they optimise themselves.
 
-### Results, all nine signs
+### Results, all twelve signs
 
 | sign | takes | frames | σ | canonical | best take | gain | jitter (canon / takes) | range kept |
 |---|---|---|---|---|---|---|---|---|
+| we | 21 | 72 | 0.4 | 0.9213 | 1.0027 | **+8.1%** | 0.0187 / 0.0271 | 88% |
 | how_are_you | 21 | 81 | 0.6 | 0.7652 | 0.8269 | **+7.5%** | 0.0245 / 0.0270 | 88% |
 | good_evening | 21 | 71 | 0.0 | 0.8104 | 0.8732 | **+7.2%** | 0.0134 / 0.0194 | 83% |
 | hello | 21 | 61 | 0.0 | 0.8262 | 0.8808 | **+6.2%** | 0.0132 / 0.0164 | 85% |
+| you_plural | 21 | 72 | 0.6 | 0.8774 | 0.9343 | **+6.1%** | 0.0124 / 0.0215 | 83% |
+| they | 21 | 68 | 0.0 | 0.8384 | 0.8917 | **+6.0%** | 0.0178 / 0.0211 | 88% |
 | pleased | 20 | 63 | 0.0 | 0.7160 | 0.7611 | **+5.9%** | 0.0153 / 0.0182 | 84% |
 | good_morning | 21 | 64 | 0.6 | 0.7554 | 0.8011 | **+5.7%** | 0.0139 / 0.0179 | 84% |
 | good_afternoon | 22 | 63 | 0.6 | 0.7579 | 0.8018 | **+5.5%** | 0.0154 / 0.0202 | 84% |
@@ -157,6 +161,12 @@ alignment features in their own space would only prove they optimise themselves.
 
 Every sign beats its own best take. Finger jitter is at or below the take median
 everywhere. 83–93% of finger range of motion is retained.
+
+`we` gains most in the whole set at +8.1%, and for the mirror of the reason
+`alright` gains least: its takes disagree more, so the average has more to add
+over any single performance. The three pronouns split 0.48–0.58, inside the band
+the greetings already occupy — the same unresolved question noted under
+*Known limitations*, not a new one.
 
 `alright` gains least at +2.4% because its takes are the most consistent of the
 nine — when the recordings already agree, averaging has least to add over a good
@@ -245,12 +255,12 @@ two *rendered* frames on `thank_you`: **0.144 snapping, 0.060 interpolating — 
 
 These are properties of the current system, not bugs with fixes pending.
 
-**Vocabulary is 9 signs.** This is the binding constraint on everything
+**Vocabulary is 12 signs.** This is the binding constraint on everything
 downstream. Any real sentence will contain mostly words with no sign, and they
 are skipped silently. The pipeline scales linearly — one video, one extraction,
 one library row per sign — but nothing about the method shortens that.
 
-**Every sign has a high split score (0.48–0.71).** All nine have takes that fall
+**Every sign has a high split score (0.48–0.71).** All twelve have takes that fall
 into two groups. `pleased` is the one where this was visibly wrong; the others
 may carry the same problem in milder form. Whether each split is a capture
 artefact or a genuine variant has not been established sign by sign — it needs
@@ -281,9 +291,23 @@ fixable with position-aware retargeting (two-bone IK), which is not built.
 
 ```bash
 # 1. extract every take to a view-space skeleton stream (cache dir of your choosing)
-#    ~2 minutes for 106 takes on 4 CPU workers
+#    73s for 63 takes on 4 CPU workers
+python -m offline.canonical.extract --source <recordings-dir> --cache <takes-dir>
+
+# 2. average each sign's takes into one canonical clip
 python -m offline.canonical.build --cache <takes-dir> --out offline/output/canonical
 ```
+
+`--source` is the recording set as delivered: one directory per sign, named
+`<number>. <words>`, holding one video per take. The directory name becomes the
+sign's slug, so `46. you (plural)` writes `you_plural`.
+
+Extraction reuses `pipeline/`'s MediaPipe extractor rather than reimplementing
+it, so a take captured for the dashboard and a take captured for a canonical are
+the same numbers. It skips takes already in the cache, which makes a re-run
+after adding one sign cheap. Face capture is off: `write_stream` keeps only
+joints, so the blendshapes would be computed and immediately discarded, and the
+face landmarker is most of the per-frame cost.
 
 `--sigma` pins the smoothing width instead of auto-selecting it; `--signs` limits
 the run to named signs. The report lands in
@@ -298,6 +322,7 @@ contract in `offline/README.md`: the offline pipeline never edits runtime files.
 
 | File | Contents |
 |---|---|
+| `offline/canonical/extract.py` | video -> view-space take cache (stages 1-3) |
 | `offline/canonical/takes.py` | loading, quality screen, alignment features |
 | `offline/canonical/dba.py` | DTW, barycenter, despike, smoothing, bone lengths |
 | `offline/canonical/build.py` | orchestration, width selection, scoring, report |

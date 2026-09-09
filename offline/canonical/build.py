@@ -51,6 +51,10 @@ SIGNS = (
     "good_night",
     "thank_you",
     "pleased",
+    # Pronouns_2of2
+    "we",
+    "you_plural",
+    "they",
 )
 GLOSS = {s: s.upper() for s in SIGNS}
 
