@@ -17,10 +17,16 @@ export interface SignEntry {
 }
 
 /**
- * YOU_PLURAL deliberately does NOT claim the bare word 'you'. ISL marks number
- * on pronouns, and the clip captured here is the plural sweep; firing it on
- * singular 'you' would sign the wrong word. The singular has not been recorded
- * yet, so 'you' on its own is skipped rather than signed incorrectly.
+ * Singular and plural pronouns are separate signs, because ISL marks number on
+ * them: YOU is the singular point, YOU_PLURAL the plural sweep, and firing
+ * either for the other signs the wrong word. Longest-phrase-first matching is
+ * what keeps them apart — 'you all' and 'all of you' reach YOU_PLURAL before
+ * the bare 'you' can claim the first word.
+ *
+ * IT is listed with the others but is the weakest entry here. English uses it
+ * as a dummy subject with no referent ("it is raining"), which ISL does not
+ * sign at all, and the exact matcher cannot tell that from a real one. The LLM
+ * path can; the matcher will over-fire on it.
  */
 export const SIGN_LIBRARY: readonly SignEntry[] = [
   { gloss: 'HELLO',          path: '/skeleton/hello.json',           words: ['hello', 'hi', 'hey'] },
@@ -32,6 +38,11 @@ export const SIGN_LIBRARY: readonly SignEntry[] = [
   { gloss: 'HOW_ARE_YOU',    path: '/skeleton/how_are_you.json',    words: ['how are you', 'how are u', 'howdy'] },
   { gloss: 'THANK_YOU',      path: '/skeleton/thank_you.json',      words: ['thank you', 'thanks', 'thankyou', 'thank u'] },
   { gloss: 'PLEASED',        path: '/skeleton/pleased.json',        words: ['pleased', 'nice to meet you', 'glad'] },
+  { gloss: 'I',              path: '/skeleton/i.json',              words: ['i', 'me', 'my', 'mine', 'myself'] },
+  { gloss: 'YOU',            path: '/skeleton/you.json',            words: ['you', 'your', 'yours', 'yourself'] },
+  { gloss: 'HE',             path: '/skeleton/he.json',             words: ['he', 'him', 'his'] },
+  { gloss: 'SHE',            path: '/skeleton/she.json',            words: ['she', 'her', 'hers'] },
+  { gloss: 'IT',             path: '/skeleton/it.json',             words: ['it', 'its'] },
   { gloss: 'WE',             path: '/skeleton/we.json',             words: ['we', 'us', 'our', 'ours'] },
   { gloss: 'YOU_PLURAL',     path: '/skeleton/you_plural.json',     words: ['you all', 'all of you', 'you people', 'y all', 'yall'] },
   { gloss: 'THEY',           path: '/skeleton/they.json',           words: ['they', 'them', 'their', 'theirs'] },
