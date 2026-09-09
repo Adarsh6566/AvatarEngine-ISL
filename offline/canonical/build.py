@@ -37,7 +37,7 @@ from .dba import (
     resample,
     temporal_smooth,
 )
-from .hands import stabilize_hands
+from .hands import MAX_UNSOLVED_FRACTION, blend_hands, stabilize_hands, unsolved_fraction
 from .takes import FINGER_TOKENS, Take, alignment_features, load_sign, signal_indices
 
 SIGNS = (
@@ -228,6 +228,21 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
     # averaging: the warp aligns partly on finger positions, so a flipped frame
     # mismatches handshapes and steers the warp, and averaging then spreads one
     # take's bad frame across the template.
+    # Screen on the hand before repairing it. A take whose palm was never
+    # solved is not a noisier input, it is a wrong one, and the repair would be
+    # inventing most of the performance rather than mending it — measured up to
+    # 96% of frames on one recording. This rejects the same takes the earlier
+    # ablation could only describe as a "systematic outlier session": they are
+    # the ones where hand tracking failed, which is why they sit apart on every
+    # sign at once.
+    unsolved = [unsolved_fraction(t.data, joint_names, parents, t.fps) for t in kept]
+    hand_rejected = [
+        (t.name, round(u, 3)) for t, u in zip(kept, unsolved) if u > MAX_UNSOLVED_FRACTION
+    ]
+    kept = [t for t, u in zip(kept, unsolved) if u <= MAX_UNSOLVED_FRACTION]
+    if len(kept) < 3:
+        return {"sign": sign, "error": f"only {len(kept)} takes with a usable hand"}
+
     repairs = []
     arrays = []
     for t in kept:
@@ -260,7 +275,12 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
     split_score, labels = two_way_split_quality(D)
     med_i = medoid(D)
 
-    raw, history = barycenter(arrays, featurize, n_frames)
+    raw, history = barycenter(
+        arrays,
+        featurize,
+        n_frames,
+        refine=lambda members, mean: blend_hands(members, mean, joint_names, parents),
+    )
 
     lengths = median_bone_lengths(arrays, joint_names, parents)
 
@@ -293,6 +313,7 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
     return {
         "sign": sign,
         "takes_used": len(kept),
+        "hand_rejected": hand_rejected,
         "hand_repair_mean": float(np.mean(repairs)) if repairs else 0.0,
         "hand_repair_max": float(np.max(repairs)) if repairs else 0.0,
         "takes_rejected": [(t.name, round(t.dropout, 3)) for t in rejected],
@@ -388,6 +409,8 @@ def main() -> None:
         for name, drop in r["takes_rejected"]:
             print(f"    rejected {name}  dropout {drop*100:.0f}%")
         print(f"  frames             {r['frames']} @ {r['fps']:.0f}fps")
+        for name, frac in r["hand_rejected"]:
+            print(f"    rejected {name}  hand unsolved {frac*100:.0f}%")
         print(f"  hand frames fixed  {r['hand_repair_mean']*100:.1f}% mean,"
               f" {r['hand_repair_max']*100:.1f}% worst take")
         print(f"  take spread        {r['spread_mean']:.4f} +/- {r['spread_std']:.4f}")

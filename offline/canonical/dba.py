@@ -115,12 +115,19 @@ def barycenter(
     iters: int = 12,
     trim: float = 0.2,
     tol: float = 1e-5,
+    refine=None,
 ) -> tuple[np.ndarray, list[float]]:
     """Iteratively align every take to the running mean, then re-average.
 
     Alignment runs on features (see takes.alignment_features) while averaging
     runs on the raw joint positions: the warp needs handshape to count for as
     much as arm travel, but the output must stay in the space the runtime plays.
+
+    `refine(members, mean)` is an optional hook applied to each reference frame
+    after the trimmed mean, given the source frames the warp mapped onto it. It
+    exists because a positional mean is the wrong operation for the hand — see
+    hands.blend_hands — and a per-frame hook is the smallest way to say so
+    without teaching this module the joint layout.
 
     Returns the canonical sequence and the mean warped distance after each
     iteration, which should decrease monotonically.
@@ -142,7 +149,12 @@ def barycenter(
 
         nxt = np.empty_like(ref)
         for r in range(n_frames):
-            nxt[r] = _trimmed_mean(np.stack(groups[r]), trim) if groups[r] else ref[r]
+            if not groups[r]:
+                nxt[r] = ref[r]
+                continue
+            members = np.stack(groups[r])
+            mean = _trimmed_mean(members, trim)
+            nxt[r] = refine(members, mean) if refine is not None else mean
 
         shift = float(np.abs(nxt - ref).mean())
         ref = nxt
