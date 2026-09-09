@@ -37,6 +37,7 @@ from .dba import (
     resample,
     temporal_smooth,
 )
+from .hands import stabilize_hands
 from .takes import FINGER_TOKENS, Take, alignment_features, load_sign, signal_indices
 
 SIGNS = (
@@ -137,12 +138,40 @@ def _finger_stats(data: np.ndarray, joint_names: tuple[str, ...]) -> tuple[float
     return steps.get("fingers", {}).get("median", 0.0), rng
 
 
+def finish(
+    raw: np.ndarray,
+    sigma: float,
+    joint_names: tuple[str, ...],
+    parents: dict[str, str | None],
+    lengths: dict[str, float],
+    fps: float,
+) -> np.ndarray:
+    """The post-averaging chain, in the one order that works.
+
+    Damp the warp's frame-to-frame wobble first, then repair the hand, then make
+    the skeleton rigid. Smoothing after the bone fix would reintroduce length
+    error by averaging neighbouring positions again, and the bone fix has to be
+    last because the hand repair moves finger positions.
+
+    The hand repair runs here as well as on the takes, because averaging puts
+    the artefact BACK. Each take can be clean and the barycenter still swing the
+    palm 177 degrees between two frames: positions are averaged per joint, which
+    does not preserve a rotation, so where warp membership changes between
+    adjacent reference frames the mean hand frame jumps. Repairing the inputs
+    alone measurably did not fix the output — this was checked, not assumed.
+    """
+    out = enforce_bone_lengths(temporal_smooth(despike(raw), sigma), joint_names, parents, lengths)
+    out, _ = stabilize_hands(out, joint_names, parents, fps)
+    return out
+
+
 def choose_sigma(
     raw: np.ndarray,
     arrays: list[np.ndarray],
     joint_names: tuple[str, ...],
     parents: dict[str, str | None],
     lengths: dict[str, float],
+    fps: float,
 ) -> tuple[float, list[tuple[float, float, float]]]:
     """Smallest smoothing width that leaves the canonical no jitterier than a take.
 
@@ -172,7 +201,7 @@ def choose_sigma(
     trace: list[tuple[float, float, float]] = []
     chosen = SIGMA_LADDER[-1]
     for s in SIGMA_LADDER:
-        cand = enforce_bone_lengths(temporal_smooth(despike(raw), s), joint_names, parents, lengths)
+        cand = finish(raw, s, joint_names, parents, lengths, fps)
         steps, rng = _motion_stats(cand, joint_names)
         trace.append((s, steps.get("fingers", {}).get("median", 0.0), rng))
         met = all(
@@ -190,7 +219,21 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
         return {"sign": sign, "error": f"only {len(kept)} usable takes"}
 
     joint_names = kept[0].joint_names
-    arrays = [t.data for t in kept]
+    parents = {j["name"]: j.get("parent") for j in _meta_of(cache, sign)["joints"]}
+
+    # Repair each take's hand before anything reads it. The palm solve is
+    # ambiguous on a hand that is moving or edge-on, and the tracker flips
+    # between its two answers — up to 179 degrees in one 1/25s frame, which no
+    # wrist can do. It has to happen here, before alignment and before
+    # averaging: the warp aligns partly on finger positions, so a flipped frame
+    # mismatches handshapes and steers the warp, and averaging then spreads one
+    # take's bad frame across the template.
+    repairs = []
+    arrays = []
+    for t in kept:
+        fixed, rep = stabilize_hands(t.data, joint_names, parents, t.fps)
+        arrays.append(fixed)
+        repairs.append(max((v["fraction"] for v in rep.values()), default=0.0))
 
     # Alignment runs on hand-relative finger features so handshape timing counts
     # for as much as arm travel; averaging still runs on raw positions.
@@ -219,21 +262,15 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
 
     raw, history = barycenter(arrays, featurize, n_frames)
 
-    parents = {j["name"]: j.get("parent") for j in _meta_of(cache, sign)["joints"]}
     lengths = median_bone_lengths(arrays, joint_names, parents)
 
     used_sigma, sigma_trace = (
-        choose_sigma(raw, arrays, joint_names, parents, lengths)
+        choose_sigma(raw, arrays, joint_names, parents, lengths, fps)
         if sigma is None
         else (sigma, [])
     )
 
-    # Order matters: damp the warp's frame-to-frame wobble first, then make the
-    # skeleton rigid. Smoothing after the bone fix would reintroduce length
-    # error by averaging neighbouring positions again.
-    canonical = enforce_bone_lengths(
-        temporal_smooth(despike(raw), used_sigma), joint_names, parents, lengths
-    )
+    canonical = finish(raw, used_sigma, joint_names, parents, lengths, fps)
     canon_jitter, canon_range = _finger_stats(canonical, joint_names)
     take_jitter, take_range = (
         float(np.median([_finger_stats(a, joint_names)[0] for a in arrays])),
@@ -256,6 +293,8 @@ def build_sign(sign: str, cache: Path, out_dir: Path, sigma: float | None = None
     return {
         "sign": sign,
         "takes_used": len(kept),
+        "hand_repair_mean": float(np.mean(repairs)) if repairs else 0.0,
+        "hand_repair_max": float(np.max(repairs)) if repairs else 0.0,
         "takes_rejected": [(t.name, round(t.dropout, 3)) for t in rejected],
         "frames": n_frames,
         "fps": fps,
@@ -349,6 +388,8 @@ def main() -> None:
         for name, drop in r["takes_rejected"]:
             print(f"    rejected {name}  dropout {drop*100:.0f}%")
         print(f"  frames             {r['frames']} @ {r['fps']:.0f}fps")
+        print(f"  hand frames fixed  {r['hand_repair_mean']*100:.1f}% mean,"
+              f" {r['hand_repair_max']*100:.1f}% worst take")
         print(f"  take spread        {r['spread_mean']:.4f} +/- {r['spread_std']:.4f}")
         print(f"  2-way split score  {r['split_score']:.3f}  sizes {r['split_sizes']}")
         print(f"  best single take   {r['best_take']}  score {r['best_take_score']:.4f}")
