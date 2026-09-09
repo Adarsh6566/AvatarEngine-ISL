@@ -52,6 +52,12 @@ SIGNS = (
     "good_night",
     "thank_you",
     "pleased",
+    # Pronouns_1of2
+    "i",
+    "you",
+    "he",
+    "she",
+    "it",
     # Pronouns_2of2
     "we",
     "you_plural",

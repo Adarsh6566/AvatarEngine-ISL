@@ -1,6 +1,6 @@
 # Canonical motion: what the model is, what it measures, and why
 
-How the twelve signs in `public/skeleton/` are produced from 253 recorded takes.
+How the seventeen signs in `public/skeleton/` are produced from 358 recorded takes.
 
 Written to be checkable: every number here is emitted by
 `offline/canonical/build.py` into `offline/output/canonical/report.json`, and
@@ -22,7 +22,7 @@ The algorithm is **DTW Barycenter Averaging** (DBA, Petitjean et al. 2011).
 
 ### Why not a network
 
-The dataset is 227 screened sequences across 12 classes — roughly 21 takes per sign. A
+The dataset is 329 screened sequences across 17 classes — roughly 21 takes per sign. A
 generative motion model with enough capacity to represent signing would have
 more parameters than it has frames to fit, and would memorise the takes rather
 than generalise from them. Averaging has no parameters to overfit, so at this
@@ -38,9 +38,9 @@ motion prior becomes the better tool and this document should be revisited.
 
 | | |
 |---|---|
-| Source | ISL Greetings set, `Greetings_1of2` + `Greetings_2of2`; Pronouns set, `Pronouns_2of2` |
-| Signs | 12 |
-| Takes | 253 recorded, 227 used (18–21 per sign after screening) |
+| Source | ISL Greetings set, `Greetings_1of2` + `Greetings_2of2`; Pronouns set, `Pronouns_1of2` + `Pronouns_2of2` |
+| Signs | 17 |
+| Takes | 358 recorded, 329 used (18–21 per sign after screening) |
 | Signers | at least 3 recording sessions, different people, different rooms |
 | Video | 1920×1080, 25 fps, 2–4 s per take |
 | Output | 59 joints/frame, 25 fps, `source_skeleton.v1 → view` |
@@ -83,7 +83,7 @@ wherever the tracker last guessed.
 
 A take is also rejected if more than **half its frames** fail the hand rate test
 of stage 10 — the palm was never solved, so repairing it would mean inventing
-most of the performance rather than mending it. This rejects **25 takes**, three
+most of the performance rather than mending it. This rejects **27 takes**, mostly three
 per sign, and they are the systematic outlier session; see *Decisions*. The
 separation is clean: rejected takes need 51–98% of frames rebuilt, kept takes
 2–28%.
@@ -210,7 +210,7 @@ interpolate *from*. The walk is seeded at the first frame that passes rather tha
 at frame 0, which is where the first version anchored 15% of takes to a pose that
 did not exist.
 
-Result across all twelve signs: worst-case wrist rotation falls from **118–177°
+Result across all seventeen signs: worst-case wrist rotation falls from **118–177°
 per frame to 27–36°**, worst-case finger swing from **94–179° to 27.6–30.1°**, and
 frames above the human limit go from 1.6–6.2% to **0.0%**. Median rotation is
 unchanged (2.7° → 2.9°), so ordinary motion passes through untouched, and finger
@@ -233,14 +233,19 @@ the claim being made.
 Scoring stays in raw joint space even though alignment uses features. Grading
 alignment features in their own space would only prove they optimise themselves.
 
-### Results, all twelve signs
+### Results, all seventeen signs
 
 | sign | takes | frames | σ | canonical | best take | gain | jitter (canon / takes) | range kept | hand frames repaired |
 |---|---|---|---|---|---|---|---|---|---|
+| she | 21 | 68 | 0.8 | 0.7751 | 0.8759 | **+11.5%** | 0.0154 / 0.0205 | 98% | 11% |
 | good_morning | 19 | 63 | 0.6 | 0.6585 | 0.7300 | **+9.8%** | 0.0128 / 0.0197 | 80% | 13% |
 | good_evening | 18 | 65 | 0.6 | 0.6899 | 0.7620 | **+9.5%** | 0.0143 / 0.0199 | 83% | 8% |
+| he | 20 | 65 | 0.0 | 0.7568 | 0.8328 | **+9.1%** | 0.0168 / 0.0202 | 97% | 11% |
 | we | 18 | 59 | 0.0 | 0.7342 | 0.8071 | **+9.0%** | 0.0261 / 0.0295 | 91% | 14% |
+| it | 20 | 54 | 0.0 | 0.8542 | 0.9366 | **+8.8%** | 0.0128 / 0.0161 | 75% | 12% |
+| you | 21 | 63 | 0.0 | 0.7701 | 0.8432 | **+8.7%** | 0.0159 / 0.0169 | 93% | 9% |
 | how_are_you | 21 | 81 | 0.0 | 0.7706 | 0.8405 | **+8.3%** | 0.0239 / 0.0265 | 89% | 11% |
+| i | 20 | 59 | 0.6 | 0.6721 | 0.7166 | **+6.2%** | 0.0141 / 0.0157 | 88% | 7% |
 | good_afternoon | 19 | 63 | 0.0 | 0.6600 | 0.7023 | **+6.0%** | 0.0192 / 0.0197 | 90% | 9% |
 | they | 21 | 68 | 0.0 | 0.8308 | 0.8836 | **+6.0%** | 0.0190 / 0.0219 | 91% | 16% |
 | you_plural | 18 | 72 | 1.4 | 0.7455 | 0.7853 | **+5.1%** | 0.0113 / 0.0209 | 83% | 5% |
@@ -260,8 +265,15 @@ unscreened ones, so the comparison no longer gets credit for beating recordings
 whose hands were never tracked.
 
 The last column is how much of the capture the hand repair (stage 10) had to
-rebuild on the takes that survived screening: 5–16% per sign, down from 11–25%
-before the badly-tracked takes were removed.
+rebuild on the takes that survived screening: 5–16% per sign.
+
+The five singular pronouns added last score among the best in the set — `she`
+leads it at +11.5%, and `he`, `she` and `you` retain 93–98% of finger range,
+more than any greeting. They are short, single-handed, and shot in one session
+each, so the takes agree closely and there is less for the warp to reconcile.
+`it` is the exception at 75% range retained, the lowest anywhere: it is the
+shortest clip in the set at 54 frames, and averaging has least room to preserve
+a brief handshape.
 
 `alright` gains least at +2.4% because its takes are the most consistent of the
 nine — when the recordings already agree, averaging has least to add over a good
@@ -309,7 +321,7 @@ to everything", cannot distinguish a variant from a broken measurement. The rate
 test asks a different question with an outside answer: was this pose physically
 possible at all.
 
-Dropped. 25 of 253 takes, leaving 18–21 per sign.
+Dropped. 27 of 358 takes, leaving 18–21 per sign.
 
 ### Finger weight 1.0, not higher
 Swept 0 / 1 / 2 / 4 on `pleased`, scored in raw joint space:
@@ -366,12 +378,12 @@ two *rendered* frames on `thank_you`: **0.144 snapping, 0.060 interpolating — 
 
 These are properties of the current system, not bugs with fixes pending.
 
-**Vocabulary is 12 signs.** This is the binding constraint on everything
+**Vocabulary is 17 signs.** This is the binding constraint on everything
 downstream. Any real sentence will contain mostly words with no sign, and they
 are skipped silently. The pipeline scales linearly — one video, one extraction,
 one library row per sign — but nothing about the method shortens that.
 
-**Every sign has a high split score (0.48–0.71).** All twelve have takes that fall
+**Every sign has a high split score (0.45–0.75).** All seventeen have takes that fall
 into two groups. `pleased` is the one where this was visibly wrong; the others
 may carry the same problem in milder form. Whether each split is a capture
 artefact or a genuine variant has not been established sign by sign — it needs
