@@ -22,7 +22,7 @@ The algorithm is **DTW Barycenter Averaging** (DBA, Petitjean et al. 2011).
 
 ### Why not a network
 
-The dataset is 253 sequences across 12 classes — roughly 21 takes per sign. A
+The dataset is 227 screened sequences across 12 classes — roughly 21 takes per sign. A
 generative motion model with enough capacity to represent signing would have
 more parameters than it has frames to fit, and would memorise the takes rather
 than generalise from them. Averaging has no parameters to overfit, so at this
@@ -40,7 +40,7 @@ motion prior becomes the better tool and this document should be revisited.
 |---|---|
 | Source | ISL Greetings set, `Greetings_1of2` + `Greetings_2of2`; Pronouns set, `Pronouns_2of2` |
 | Signs | 12 |
-| Takes | 253 total (21–22 per sign) |
+| Takes | 253 recorded, 227 used (18–21 per sign after screening) |
 | Signers | at least 3 recording sessions, different people, different rooms |
 | Video | 1920×1080, 25 fps, 2–4 s per take |
 | Output | 59 joints/frame, 25 fps, `source_skeleton.v1 → view` |
@@ -70,13 +70,23 @@ and camera distance divide out.
 `pipeline/extractor/smooth.py`, heavier on the spine, lighter on the hands.
 
 ### 4. Quality screen
+Two rejections, both asking whether a take was *measured*, not whether it was
+performed well.
+
 A take is rejected if more than 2% of frames have a wrist missing or pinned at
 the origin. MediaPipe emits a joint for every frame whether or not it saw one,
 so an absent hand appears as a degenerate value rather than a gap — and those
 frames do not make the average noisier, they make it *wrong*, dragging it toward
 wherever the tracker last guessed.
 
-**One take rejected across the whole set:** `pleased/MVI_9955`, 6.8% dropout.
+**One take rejected on that criterion:** `pleased/MVI_9955`, 6.8% dropout.
+
+A take is also rejected if more than **half its frames** fail the hand rate test
+of stage 10 — the palm was never solved, so repairing it would mean inventing
+most of the performance rather than mending it. This rejects **25 takes**, three
+per sign, and they are the systematic outlier session; see *Decisions*. The
+separation is clean: rejected takes need 51–98% of frames rebuilt, kept takes
+2–28%.
 
 ### 5. Alignment features
 DTW needs a per-frame vector to compare. It is built as:
@@ -103,7 +113,26 @@ warp blends open hands into closed ones.
   convergence: 6–12 iterations depending on the sign.
 
 Alignment runs on the features from stage 5; **averaging runs on raw joint
-positions**, because the output has to stay in the space the runtime plays.
+positions**, because the output has to stay in the space the runtime plays —
+*except for the hands*, which are averaged as rotations.
+
+A positional mean folds fingers. It is the same fault the pipeline already
+corrects for bone lengths in stage 9, but stage 9 cannot see this one: it fixes
+each bone's length while leaving the chain's joint angles averaged, so every
+bone comes out the right length and the whole finger sits curled tighter than
+any take performed. On `they` the takes hold the four fingers at 0.84 / 0.74 /
+0.84 / 0.88 straightness and the positional mean returned **0.96 / 0.70 / 0.97 /
+0.98** — three fingers pulled straight and one left bent, which is not a
+handshape anyone signed. Elsewhere in the same clip the index reached 0.15
+against a tightest take of 0.55.
+
+So for each reference frame the hand is rebuilt from the mean of its members'
+*rotations*: the hand's orientation as an averaged quaternion, each finger bone
+as an averaged unit direction in that frame, lengths from the median. That keeps
+the result on the manifold of poses a hand can hold. `they` now returns 0.87 /
+0.72 / 0.85 / 0.90 against the takes' 0.84 / 0.74 / 0.84 / 0.88, and
+`you_plural` keeps the index-versus-rest separation that makes it a pointing
+sign at all.
 
 ### 7. Despiking
 A 3-frame running median. The barycenter's worst artefact is not its general
@@ -164,10 +193,28 @@ enforcement, not before. Enforcing lengths rescales each knuckle independently
 from the hand, which swings the index→little vector the palm's roll is measured
 against and put the flip straight back — 33°/frame became 171° again.
 
-Result across all twelve signs: worst-case hand rotation falls from **118–177°
-per frame to 28–36°**, and frames above the human limit go from 1.6–6.2% to
-**0.0%**. Median rotation is unchanged (2.7° → 2.9°), so ordinary motion passes
-through untouched, and finger range of motion went *up* rather than down.
+**The fingers need their own test.** Stabilising the palm says nothing about
+articulation. With the hand frame divided out, single finger bones were still
+measured snapping **178.9° between frames**, 6.1% of them above 30°/frame — which
+is what reads as fingers moving on their own and crossing into each other. Each
+bone therefore gets the same rate test against its own direction in the hand
+frame, at **700°/s**: rapid finger tapping tops out near 800°/s and signing is
+not tapping. Cost is 0.7% of articulation range.
+
+**An undetected hand is not a noisy one.** MediaPipe emits a joint whether or not
+it found one, so a hand it never saw comes back with every finger collapsed onto
+the wrist — **10.5% of all frames**, and 15% of takes open on one. A collapsed
+bone has no direction at all; normalising it gives NaN or an arbitrary axis. Such
+frames can never be trusted and, more importantly, can never be an endpoint to
+interpolate *from*. The walk is seeded at the first frame that passes rather than
+at frame 0, which is where the first version anchored 15% of takes to a pose that
+did not exist.
+
+Result across all twelve signs: worst-case wrist rotation falls from **118–177°
+per frame to 27–36°**, worst-case finger swing from **94–179° to 27.6–30.1°**, and
+frames above the human limit go from 1.6–6.2% to **0.0%**. Median rotation is
+unchanged (2.7° → 2.9°), so ordinary motion passes through untouched, and finger
+range of motion went *up* rather than down.
 ---
 
 ## What is measured, and the results
@@ -190,31 +237,31 @@ alignment features in their own space would only prove they optimise themselves.
 
 | sign | takes | frames | σ | canonical | best take | gain | jitter (canon / takes) | range kept | hand frames repaired |
 |---|---|---|---|---|---|---|---|---|---|
-| we | 21 | 72 | 0.6 | 0.9010 | 0.9954 | **+9.5%** | 0.0179 / 0.0261 | 91% | 22% |
-| how_are_you | 21 | 81 | 0.6 | 0.7642 | 0.8407 | **+9.1%** | 0.0255 / 0.0271 | 88% | 11% |
-| good_morning | 21 | 64 | 0.0 | 0.7379 | 0.8019 | **+8.0%** | 0.0128 / 0.0193 | 81% | 19% |
-| you_plural | 21 | 72 | 0.6 | 0.8690 | 0.9355 | **+7.1%** | 0.0129 / 0.0201 | 85% | 12% |
-| they | 21 | 68 | 0.0 | 0.8246 | 0.8847 | **+6.8%** | 0.0181 / 0.0218 | 88% | 17% |
-| pleased | 20 | 63 | 0.0 | 0.7102 | 0.7614 | **+6.7%** | 0.0140 / 0.0185 | 83% | 19% |
-| good_evening | 21 | 71 | 0.0 | 0.8121 | 0.8691 | **+6.6%** | 0.0131 / 0.0199 | 88% | 19% |
-| hello | 21 | 61 | 0.0 | 0.8406 | 0.8941 | **+6.0%** | 0.0124 / 0.0170 | 84% | 18% |
-| good_afternoon | 22 | 63 | 0.0 | 0.7642 | 0.8055 | **+5.1%** | 0.0189 / 0.0200 | 92% | 17% |
-| good_night | 21 | 67 | 0.6 | 0.8960 | 0.9334 | **+4.0%** | 0.0180 / 0.0182 | 88% | 25% |
-| thank_you | 21 | 60 | 1.4 | 0.7053 | 0.7334 | **+3.8%** | 0.0193 / 0.0231 | 89% | 14% |
-| alright | 21 | 63 | 0.4 | 0.8884 | 0.9075 | **+2.1%** | 0.0179 / 0.0195 | 92% | 15% |
+| good_morning | 19 | 63 | 0.6 | 0.6585 | 0.7300 | **+9.8%** | 0.0128 / 0.0197 | 80% | 13% |
+| good_evening | 18 | 65 | 0.6 | 0.6899 | 0.7620 | **+9.5%** | 0.0143 / 0.0199 | 83% | 8% |
+| we | 18 | 59 | 0.0 | 0.7342 | 0.8071 | **+9.0%** | 0.0261 / 0.0295 | 91% | 14% |
+| how_are_you | 21 | 81 | 0.0 | 0.7706 | 0.8405 | **+8.3%** | 0.0239 / 0.0265 | 89% | 11% |
+| good_afternoon | 19 | 63 | 0.0 | 0.6600 | 0.7023 | **+6.0%** | 0.0192 / 0.0197 | 90% | 9% |
+| they | 21 | 68 | 0.0 | 0.8308 | 0.8836 | **+6.0%** | 0.0190 / 0.0219 | 91% | 16% |
+| you_plural | 18 | 72 | 1.4 | 0.7455 | 0.7853 | **+5.1%** | 0.0113 / 0.0209 | 83% | 5% |
+| pleased | 18 | 60 | 0.0 | 0.6221 | 0.6551 | **+5.0%** | 0.0173 / 0.0196 | 87% | 13% |
+| thank_you | 20 | 58 | 2.0 | 0.6518 | 0.6825 | **+4.5%** | 0.0186 / 0.0233 | 87% | 11% |
+| alright | 18 | 61 | 0.8 | 0.6944 | 0.7231 | **+4.0%** | 0.0125 / 0.0217 | 85% | 6% |
+| hello | 19 | 56 | 0.6 | 0.7107 | 0.7369 | **+3.6%** | 0.0168 / 0.0168 | 87% | 13% |
+| good_night | 18 | 61 | 0.8 | 0.7505 | 0.7681 | **+2.3%** | 0.0165 / 0.0193 | 81% | 14% |
 
 Every sign beats its own best take. Finger jitter is at or below the take median
-everywhere. 81–92% of finger range of motion is retained.
+everywhere. 80–91% of finger range of motion is retained.
 
-`we` gains most in the whole set at +9.5%, and for the mirror of the reason
-`alright` gains least: its takes disagree more, so the average has more to add
-over any single performance. The three pronouns split 0.45–0.52, inside the band
-the greetings already occupy — the same unresolved question noted under
-*Known limitations*, not a new one.
+Gains are smaller than they were before the hand work, and that is the expected
+direction: the baseline moved. Both the canonical and the "best single take" it
+is measured against are now scored over 18–21 screened takes rather than 21
+unscreened ones, so the comparison no longer gets credit for beating recordings
+whose hands were never tracked.
 
-The last column is how much of the capture the hand repair (stage 8) had to
-rebuild. It runs at 11–25% per sign, and the worst single take in the set needed
-96%: one recording where the tracker never held a stable palm at all.
+The last column is how much of the capture the hand repair (stage 10) had to
+rebuild on the takes that survived screening: 5–16% per sign, down from 11–25%
+before the badly-tracked takes were removed.
 
 `alright` gains least at +2.4% because its takes are the most consistent of the
 nine — when the recordings already agree, averaging has least to add over a good
@@ -238,15 +285,31 @@ single performance. That is the expected shape of the result, not a fault.
 Each of these was settled by measurement, and several overturned the first
 answer.
 
-### Keep the outlier session
-One recording session (`01xx`) sits ~1.8 from the others where they sit ~1.1
-among themselves, on *every* sign — the signature of a capture artefact rather
-than a linguistic variant, which would differ per sign.
+### The outlier session — kept, then dropped on better evidence
+One recording session (`MVI_0079`–`MVI_0116`) sits ~1.8 from the others where
+they sit ~1.1 among themselves, on *every* sign — the signature of a capture
+artefact rather than a linguistic variant, which would differ per sign.
 
-An ablation was run with the criterion fixed in advance: *drop it only if that
-helps against both the full set and the majority subset*. It helped only against
-the subset it was fitted to (circular) and **hurt** against the full population
-on 3 of 4 signs tested. **Kept.**
+It was originally **kept**. An ablation with the criterion fixed in advance —
+*drop it only if that helps against both the full set and the majority subset* —
+helped only against the subset it was fitted to (circular) and hurt against the
+full population on 3 of 4 signs.
+
+That is now **overturned**, because the hand rate test explains what the distance
+metric could only describe. Those takes are the ones where hand tracking failed:
+they need **51–98% of their frames rebuilt**, against 2–28% for every other take
+in the set, and the gap is clean with nothing in between. Three takes per sign,
+25 in total.
+
+The old ablation could not have seen this. It scored candidate templates by mean
+warped distance *to the full population, including these takes* — so a template
+dragged toward badly-tracked hands scored well precisely because the bad hands
+were in the reference. The question it asked, "does dropping them improve the fit
+to everything", cannot distinguish a variant from a broken measurement. The rate
+test asks a different question with an outside answer: was this pose physically
+possible at all.
+
+Dropped. 25 of 253 takes, leaving 18–21 per sign.
 
 ### Finger weight 1.0, not higher
 Swept 0 / 1 / 2 / 4 on `pleased`, scored in raw joint space:
@@ -376,6 +439,6 @@ contract in `offline/README.md`: the offline pipeline never edits runtime files.
 | `offline/canonical/extract.py` | video -> view-space take cache (stages 1-3) |
 | `offline/canonical/takes.py` | loading, quality screen, alignment features |
 | `offline/canonical/dba.py` | DTW, barycenter, despike, smoothing, bone lengths |
-| `offline/canonical/hands.py` | palm-flip detection and hand repair |
+| `offline/canonical/hands.py` | hand screening, rotation averaging, palm and finger repair |
 | `offline/canonical/build.py` | orchestration, width selection, scoring, report |
 | `offline/output/canonical/report.json` | every metric, per sign |
