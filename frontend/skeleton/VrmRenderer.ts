@@ -58,6 +58,12 @@ function readDebugOptions(): Partial<RetargetOptions> {
     // Finger driving mode: 'full' (proximal+intermediate), 'prox' (proximal
     // only — the intermediate bone left at rest), 'off' (fingers at rest).
     fingerMode: (q.get('fingers') ?? 'full') as 'full' | 'prox' | 'off',
+    // Arm IK on by DEFAULT: copying elbow angles onto arms 1.32x longer than
+    // the signers' puts the hands where the signer's never were, and on WE it
+    // drove them through each other. Solving the elbow for the wrist position
+    // instead keeps each hand where it was relative to its own shoulder.
+    // Pass ?ik=0 for the old rotation-only behaviour, to compare.
+    armIK: q.get('ik') !== '0',
   };
 }
 

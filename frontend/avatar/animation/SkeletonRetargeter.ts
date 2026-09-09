@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { measureArms, solveElbow, type ArmRigs } from './armIK';
 import { VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
 
 /**
@@ -206,6 +207,13 @@ export interface RetargetOptions {
    * long enough that direction is stable.
    */
   fingerSmoothing: number;
+  /**
+   * Solve the elbow so the HAND lands where the signer's did, instead of
+   * copying the elbow angle onto a longer arm. See armIK.ts. Off falls back to
+   * pure rotation transfer, which is what shipped before and is kept as an
+   * escape hatch for comparing the two.
+   */
+  armIK: boolean;
 }
 
 export const DEFAULT_RETARGET_OPTIONS: RetargetOptions = {
@@ -218,13 +226,18 @@ export const DEFAULT_RETARGET_OPTIONS: RetargetOptions = {
   driveBody: false,
   fingerMode: 'full',
   fingerSmoothing: 0,
+  armIK: true,
 };
 
 const _c = new THREE.Vector3();
+const _ikL = new THREE.Vector3();
+const _ikR = new THREE.Vector3();
 
 export class SkeletonRetargeter {
   private readonly options: RetargetOptions;
 
+  /** Avatar arm lengths in hip->head units, for armIK. Null if the rig lacks arms. */
+  private armRigs: ArmRigs | null = null;
   /** Rest bone directions (normalized), captured from the VRM T-pose. */
   private readonly restDir = new Map<VRMHumanBoneName, THREE.Vector3>();
   /** Rest across-axis, for the bones that declare one (the hands). */
@@ -291,6 +304,7 @@ export class SkeletonRetargeter {
       const b = worldPos(d.restChild);
       if (a && b) this.restDir.set(d.bone, b.clone().sub(a).normalize());
     }
+    this.armRigs = measureArms((b) => worldPos(b as VRMHumanBoneName));
     const hipsNode = node(V.Hips);
     hipsNode?.parent?.getWorldQuaternion(this.rootParentWorldQ);
     this.captured = true;
@@ -306,7 +320,7 @@ export class SkeletonRetargeter {
     if (!this.captured) return;
     const o = this.options;
 
-    const pos = (name: string): THREE.Vector3 | null => {
+    const captured = (name: string): THREE.Vector3 | null => {
       const v = joints[name];
       if (!v) return null;
       let x = v[0] * o.sx;
@@ -316,6 +330,29 @@ export class SkeletonRetargeter {
       else if (o.swap === 'xy') [x, y] = [y, x];
       else if (o.swap === 'yz') [y, z] = [z, y];
       return new THREE.Vector3(x, y, z);
+    };
+
+    // Replace the captured elbow with one that puts the wrist on target for
+    // THIS rig's arm lengths. Everything downstream still reads positions and
+    // extracts swings from them, so the two arm drives pick the corrected
+    // angles up without knowing IK happened. The wrist and everything past it
+    // — hand, fingers — is left exactly as captured.
+    let ikL: THREE.Vector3 | null = null;
+    let ikR: THREE.Vector3 | null = null;
+    if (o.armIK && this.armRigs) {
+      const solve = (p: 'l' | 'r', rig: { upper: number; fore: number }, out: THREE.Vector3) => {
+        const s = captured(`${p}Shoulder`);
+        const e = captured(`${p}Elbow`);
+        const w = captured(`${p}Wrist`);
+        return s && e && w ? solveElbow(s, w, e, rig.upper, rig.fore, out) : null;
+      };
+      ikL = solve('l', this.armRigs.left, _ikL);
+      ikR = solve('r', this.armRigs.right, _ikR);
+    }
+    const pos = (name: string): THREE.Vector3 | null => {
+      if (name === 'lElbow' && ikL) return ikL;
+      if (name === 'rElbow' && ikR) return ikR;
+      return captured(name);
     };
 
     const pose: Partial<Record<VRMHumanBoneName, { rotation: [number, number, number, number] }>> = {};
