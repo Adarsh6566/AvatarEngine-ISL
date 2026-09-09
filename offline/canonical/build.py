@@ -167,7 +167,13 @@ def finish(
     alone measurably did not fix the output — this was checked, not assumed.
     """
     out = enforce_bone_lengths(temporal_smooth(despike(raw), sigma), joint_names, parents, lengths)
-    out, _ = stabilize_hands(out, joint_names, parents, fps)
+    # The fingers are rebuilt from `raw`, not from `out`: despike and the
+    # Gaussian are per-axis position filters and a hand is the one place they
+    # cannot go. They are kept for the arms and torso, where a joint is free to
+    # move on its own, and the hand gets the equivalent damping in rotation
+    # space inside stabilize_hands at the same width. The hand ROOT still comes
+    # from `out`, so the hand follows the smoothed arm.
+    out, _ = stabilize_hands(out, joint_names, parents, fps, smooth=sigma, source=raw)
     return out
 
 
