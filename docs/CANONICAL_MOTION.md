@@ -453,11 +453,69 @@ units and the rotation-only avatar carried them on to **0.048**, overlapping for
 The shoulder and the wrist are the constraints, the elbow is placed by the
 cosine rule, and the observed elbow picks the swivel so the arm still bends the
 way the signer's did. Each hand ends up where it was relative to its own
-shoulder; on `we` the closest approach becomes 0.138 and no frame overlaps.
+shoulder, and on `we` the wrists separate from 0.048 to **0.138**.
+
+**That fixed the wrists and not the hands.** The 0.138 above is a wrist-to-wrist
+number, and a wrist is a point while a hand is not: this rig reaches 10.5cm from
+the wrist to a fingertip, and the sign brings the wrists to 7.1cm apart. Measured
+through the real retargeter against the real rig, the two hands' BONES still
+closed to **0.6cm** and overlapped on **23 frames of 59** — with the wrists a
+correct 13.3cm apart the whole time. Measuring the wrong quantity is what let the
+first fix report success.
+
+The captured hands cannot settle it either. MediaPipe's hand landmarks arrive
+about **3.4× too small** against the body — 0.077 hip→head units where this rig
+is 0.262 — so the recorded fingers clear each other by 1.8cm at a scale where the
+avatar's are deep inside each other. Only the avatar's own geometry says what
+fits.
+
+`frontend/avatar/animation/handClearance.ts` pushes the two wrist targets apart
+by the smallest amount that clears the hands, and armIK re-solves both elbows for
+the moved targets. Two properties make it exact rather than iterative:
+
+- a hand's world **orientation** is the captured direction and nothing else — the
+  rotation is built in the parent's frame and multiplied back by it, so the
+  forearm cancels and a moved elbow cannot turn the hand. Each hand therefore
+  translates **rigidly** with its wrist (verified: hand world rotation changes by
+  3.4e-6°, finger rotations by 6.2e-6°),
+- so along a fixed axis a pair separated by `d` ends up `|d + δu|` apart, which is
+  one quadratic in δ per pair.
+
+The axis is the **closest pair's own direction, smoothed**, and getting there took
+two wrong answers. Pushing along the wrist axis is the obvious choice and clears
+only 13 of the 21 frames, because the wrists are separated sideways while the
+collision is almost entirely in **depth**: at the closest frames the pair
+direction runs [-0.06, 0.12, **-0.99**] against a wrist axis of [0.86, -0.03,
+-0.50]. That the collision is in depth is not chance — depth is the one axis a
+single camera cannot measure, and the wrists hold only 2cm of it through the
+cross, less than a hand is thick. Smoothing (0.25 per frame) is what makes the
+pair direction usable: the closest pair jumps between bones frame to frame, and
+an axis that jumps makes the hands judder.
+
+| | before | after |
+|---|---|---|
+| `we` closest hand-to-hand | 0.6cm | **2.5cm** |
+| `we` frames overlapping | 21 of 59 | **0** |
+| `thank_you` | 0.6cm, 9 frames | **2.5cm, 0** |
+| `alright` | 1.9cm, 3 frames | **2.5cm, 0** |
+| the other 14 signs | — | **bit-identical** |
+
+The clearance is measured from the rig rather than tuned: 1.35× the mean gap
+between adjacent knuckles, which is a finger's width plus room for the palm
+behind it — 2.5cm here. Worst wrist displacement across all seventeen is 2.4cm,
+against a 4.8cm safety cap that no sign reaches. Cost is 0.007ms per frame.
 
 This is a *playback* fix and lives in the frontend, not in this pipeline — the
 clips are unchanged, and the same clips on a differently-proportioned avatar get
 that avatar's solution. Pass `?ik=0` to compare against the old behaviour.
+
+`cd frontend && npm test` checks all of this against the shipped `.vrm` and the
+shipped clips: no sign overlapping, the fourteen non-colliding signs untouched,
+handshapes unturned, no judder introduced, and the push solver exact over 4000
+random point sets. That last one earned its place — solving each pair
+independently and taking the largest root looks right and is not, because a push
+one pair demands can drag a pair that was already clear back under. It passed all
+seventeen clips and failed the random test at 4.51cm of 5.
 
 Still open: the capture under-elevates the arms (above), which IK cannot
 recover — it faithfully reaches the position that was measured, including when
