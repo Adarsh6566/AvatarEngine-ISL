@@ -368,6 +368,23 @@ export function LectureApp() {
         <div className="relative min-h-0 min-w-0 overflow-hidden">
           <span className="pane-label">lecturer</span>
           <video id="video" controls playsInline className="h-full w-full bg-[#0d0b09] object-contain" />
+          {/*
+            Shown while lecture/main.ts is holding the video for the signer.
+            Without it a deliberate pause is indistinguishable from a stall, and
+            the thing a viewer does about a stall is start clicking.
+
+            Always mounted and hidden by the `hidden` attribute, like everything
+            else main.ts resolves by id.
+          */}
+          <div
+            id="waiting"
+            hidden
+            className="pointer-events-none absolute inset-x-0 bottom-12 z-[7] flex justify-center"
+          >
+            <span className="rounded-full bg-ink/75 px-3.5 py-1.5 text-[11px] font-semibold tracking-[0.06em] text-white uppercase backdrop-blur-md">
+              waiting for the signer
+            </span>
+          </div>
         </div>
 
         <Splitter

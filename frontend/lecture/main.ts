@@ -46,6 +46,7 @@ const captionEl = el<HTMLDivElement>('caption');
 const glossEl = el<HTMLDivElement>('gloss');
 const captionRoot = captionEl.closest<HTMLDivElement>('.caption')!;
 const resetViewBtn = el<HTMLButtonElement>('reset-view');
+const waitingEl = el<HTMLDivElement>('waiting');
 const lecturerImg = el<HTMLImageElement>('lecturer');
 const urlInput = el<HTMLInputElement>('url');
 const fetchBtn = el<HTMLButtonElement>('fetch');
@@ -272,13 +273,59 @@ function setCaption(text: string, gloss: string): void {
 }
 
 // --- sign queue --------------------------------------------------------------
-// A lecturer does not wait. Phrases arrive as the video reaches them, and one
-// may still be signing when the next is due, so they queue rather than drop.
-const queue: SignMatch[] = [];
-let busy = false;
+/*
+ * A lecturer does not wait — so the video does, but only when it has to.
+ *
+ * Phrases arrive as the video reaches them and one may still be signing when
+ * the next is due, so they queue. Nothing used to slow the video down and the
+ * queue only ever grew: simulated over the 358s greetings lecture with the real
+ * clips, the avatar ended up 19.1s behind the lecturer at worst, with 20 of 86
+ * signs starting more than 5s after the words they translate. A sign that late
+ * is not an interpretation of anything the viewer can still hear.
+ *
+ * Pausing on every phrase fixes the sync and costs too much: 32 pauses averaging
+ * 0.91s, which reads as a stutter rather than as waiting, and stretches the
+ * lecture by 8%.
+ *
+ * What works is allowing a LAG. The avatar may run up to LAG_TOLERANCE_S behind
+ * and the video simply carries on; the quiet gaps between phrases are long
+ * enough to absorb nearly every burst, so the backlog drains by itself. Only a
+ * burst that outlasts the tolerance stops the video, and it restarts the moment
+ * the avatar is back inside it. Measured across the same lecture:
+ *
+ *     tolerance   pauses   total wait   worst lag   signs >5s late
+ *     never            0         0.0s       19.1s               20
+ *     0.0s            32        29.2s        0.0s                0
+ *     2.0s             8         5.1s        2.0s                0
+ *     4.0s             4         2.0s        3.9s                0
+ *
+ * 2s keeps the avatar under one sign's length behind (the clips run 2.16-3.24s)
+ * for a 1% longer lecture and about one pause every 45 seconds. It is also
+ * roughly the lag a human interpreter runs at, so it reads as interpretation
+ * rather than as delay.
+ *
+ * `?wait=0` turns the holding off, for comparison.
+ */
+const LAG_TOLERANCE_S = (() => {
+  const raw = new URLSearchParams(window.location.search).get('wait');
+  if (raw === '0') return Infinity; // never hold
+  const n = raw === null ? NaN : Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 2;
+})();
 
-function enqueue(matches: readonly SignMatch[]): void {
-  queue.push(...matches);
+/** A queued sign, with the video time it became due — what lag is measured against. */
+interface Pending {
+  readonly match: SignMatch;
+  readonly dueAt: number;
+}
+
+const queue: Pending[] = [];
+let busy = false;
+/** The sign being performed now. Being FIFO, it is always the furthest behind. */
+let current: Pending | null = null;
+
+function enqueue(matches: readonly SignMatch[], dueAt: number): void {
+  for (const match of matches) queue.push({ match, dueAt });
   void drain();
 }
 
@@ -287,20 +334,117 @@ async function drain(): Promise<void> {
   busy = true;
   try {
     while (queue.length) {
-      const match = queue.shift();
-      if (!match) continue;
-      setCaption(match.text, match.entry.gloss);
+      current = queue.shift() ?? null;
+      if (!current) continue;
+      setCaption(current.match.text, current.match.entry.gloss);
       try {
-        await playSign(await stream(match.entry.path));
+        await playSign(await stream(current.match.entry.path));
       } catch (error) {
         console.error('[lecture]', error);
       }
+      // Re-check between signs: finishing one is what lets the video go again.
+      current = null;
+      assessLag();
     }
   } finally {
+    current = null;
     setCaption('', '');
     busy = false;
+    assessLag();
   }
 }
+
+// --- holding the video for the signer ----------------------------------------
+/** True while the video is paused BY US, and so is ours to resume. */
+let holding = false;
+/*
+ * pause() and play() raise their events asynchronously, so a flag cleared on the
+ * next line would already be false by the time the handler ran. The handler
+ * clears it instead, and it is only ever set when a state change will really
+ * happen.
+ */
+let selfPaused = false;
+/*
+ * Set when the viewer presses play during a hold.
+ *
+ * Without it they cannot overrule one: play() clears `holding`, the next
+ * assessLag() sees the backlog is still there and pauses again within a quarter
+ * of a second, and the button appears broken. One press now carries them
+ * through the current backlog, and holding re-arms by itself once the avatar is
+ * back inside the tolerance.
+ */
+let overridden = false;
+
+/** How far the avatar is behind the lecturer, in the lecturer's own seconds. */
+function lagSeconds(): number {
+  const oldest = current ?? queue[0];
+  return oldest ? video.currentTime - oldest.dueAt : 0;
+}
+
+function assessLag(): void {
+  if (!Number.isFinite(LAG_TOLERANCE_S)) return;
+  const behind = lagSeconds() > LAG_TOLERANCE_S;
+  // Only when there is no backlog AT ALL, not merely when it dips under the
+  // tolerance for a moment: expiring on the dip re-held the viewer a second or
+  // two after they pressed play, which is indistinguishable from ignoring them.
+  if (!current && queue.length === 0) overridden = false;
+  if (behind && !overridden && !holding && !video.paused && !video.ended) {
+    holding = true;
+    selfPaused = true;
+    waitingEl.hidden = false;
+    video.pause();
+  } else if (!behind && holding) {
+    holding = false;
+    waitingEl.hidden = true;
+    if (!video.ended) void video.play().catch(() => {});
+  }
+}
+
+// A pause the viewer asked for is not ours to undo.
+video.addEventListener('pause', () => {
+  if (selfPaused) {
+    selfPaused = false;
+    return;
+  }
+  holding = false;
+  waitingEl.hidden = true;
+});
+// Pressing play is a decision to keep watching. Let it run, and re-assess only
+// when the next phrase lands.
+video.addEventListener('play', () => {
+  if (holding) overridden = true; // they overruled this hold; do not re-impose it
+  holding = false;
+  waitingEl.hidden = true;
+});
+video.addEventListener('ended', () => {
+  holding = false;
+  waitingEl.hidden = true;
+});
+/*
+ * A seek abandons the backlog. Signs queued for where the viewer WAS are not
+ * translations of where they are now, and holding the video to finish them
+ * would strand it, since the lag would be measured against a due time with
+ * nothing to do with currentTime any more.
+ */
+/** Set when a seek interrupted a hold, so playback is handed back afterwards. */
+let resumeAfterSeek = false;
+
+video.addEventListener('seeking', () => {
+  // Our pause was never the viewer's choice, so scrubbing out of one has to
+  // give playback back. Gated on `holding`, which is only ever true when WE
+  // paused — a viewer who paused and then scrubbed stays paused.
+  if (holding) resumeAfterSeek = true;
+  queue.length = 0;
+  // `current` too, not just the queue. It is what lag is measured against, and
+  // after a jump its due time has nothing to do with currentTime: seeking from
+  // 29s to 200s left a sign in flight due at 29s, so the very next assessLag
+  // read a 171s lag and held the video immediately, every time anyone scrubbed.
+  // The sign in flight is allowed to finish; it just stops counting.
+  current = null;
+  holding = false;
+  overridden = false;
+  waitingEl.hidden = true;
+});
 
 // --- transcript --------------------------------------------------------------
 interface Segment {
@@ -364,15 +508,33 @@ function syncToVideo(): void {
     item.row.dataset.active = String(active);
     if (active && !item.fired) {
       item.fired = true;
-      if (item.matches.length) enqueue(item.matches);
+      // Due NOW, not from the segment's start. The two are the same during
+      // normal playback — timeupdate fires about four times a second, so `t` is
+      // within a quarter-second of the start that just triggered it — but they
+      // are not when someone seeks INTO the middle of a phrase. Landing at 200s
+      // in a segment that began at 195s made the sign five seconds late the
+      // instant it was queued, and the video stopped dead to let the avatar
+      // "catch up" on a delay that had never happened.
+      if (item.matches.length) enqueue(item.matches, t);
     }
     // Rewinding past a segment makes it eligible again.
     if (t < item.segment.start && item.fired) item.fired = false;
   }
 }
 
-video.addEventListener('timeupdate', syncToVideo);
-video.addEventListener('seeked', syncToVideo);
+video.addEventListener('timeupdate', () => {
+  syncToVideo();
+  // ~4 times a second, which is often enough: the tolerance is in seconds and a
+  // quarter-second of overshoot is not visible.
+  assessLag();
+});
+video.addEventListener('seeked', () => {
+  syncToVideo();
+  if (resumeAfterSeek) {
+    resumeAfterSeek = false;
+    if (!video.ended) void video.play().catch(() => {});
+  }
+});
 
 // --- wiring ------------------------------------------------------------------
 let chosen: File | null = null;
