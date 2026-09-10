@@ -88,9 +88,10 @@ export function SignerApp() {
           </button>
         </div>
 
-        {/* pr-[92px] under 820px reserves the speed control's footprint, which
-            is fixed bottom-right and would otherwise sit on top of this text. */}
-        <div className="mt-2.5 text-center text-[12.5px] text-ink/50 max-[820px]:pr-[92px]">
+        {/* No right-hand reservation: the speed control now measures this bar
+            and lifts above it instead of overlapping, so the text can use the
+            full width and stay centred. See PlaybackSpeedControl clearOf. */}
+        <div className="mt-2.5 text-center text-[12.5px] text-ink/50">
           <div id="status" className="min-h-[18px] text-accent" />
           <div>
             knows: <b className="font-semibold text-ink/70"><span id="known" /></b>
