@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RenderEngine } from '../core/RenderEngine';
 import { VrmLoader } from '../avatar/loading/VrmLoader';
 import { SkeletonRetargeter } from '../avatar/animation/SkeletonRetargeter';
@@ -44,6 +45,7 @@ const transcriptEl = el<HTMLDivElement>('transcript');
 const captionEl = el<HTMLDivElement>('caption');
 const glossEl = el<HTMLDivElement>('gloss');
 const captionRoot = captionEl.closest<HTMLDivElement>('.caption')!;
+const resetViewBtn = el<HTMLButtonElement>('reset-view');
 const lecturerImg = el<HTMLImageElement>('lecturer');
 const urlInput = el<HTMLInputElement>('url');
 const fetchBtn = el<HTMLButtonElement>('fetch');
@@ -74,6 +76,30 @@ const fill = new THREE.DirectionalLight(0xffffff, 0.7);
 fill.position.set(-1.4, 0.6, 0.8);
 engine.add(fill);
 
+/*
+ * Let the viewer move the camera.
+ *
+ * This pane is the smallest of the three — on a phone it is about 267px tall —
+ * and a fixed head-on shot at that size makes a handshape hard to read. The
+ * other two pipelines have had orbit since they were written; this one never
+ * got it.
+ *
+ * Rotate and zoom only. Panning is off deliberately: it is the one gesture that
+ * can carry the avatar off screen entirely, and on a touch screen it shares
+ * two fingers with the pinch that zooms. The distance and polar limits exist
+ * for the same reason — every reachable camera still has the avatar in it, so
+ * there is no way to get lost, and Reset view is a way back rather than a
+ * rescue.
+ */
+const controls = new OrbitControls(engine.camera, engine.domElement);
+controls.enableDamping = true;
+controls.enablePan = false;
+controls.minDistance = 1.6;   // closer than this and the near plane clips the face
+controls.maxDistance = 8;
+controls.minPolarAngle = Math.PI * 0.12;  // not looking straight down the crown
+controls.maxPolarAngle = Math.PI * 0.62;  // not up through the floor
+engine.onUpdate(() => controls.update());
+
 const retargeter = new SkeletonRetargeter({ fingerMode: 'full', fingerSmoothing: 0.9 });
 
 /*
@@ -90,7 +116,21 @@ const retargeter = new SkeletonRetargeter({ fingerMode: 'full', fingerSmoothing:
  */
 const MIN_DISTANCE = 4.2; // the framing this pane has always used
 
+/*
+ * Auto-framing yields to the viewer, permanently, the moment they move the
+ * camera.
+ *
+ * fitToChrome sets camera.position outright, and this pane re-frames on every
+ * resize — which the splitter causes on every drag, and the Source toggle
+ * causes too. Left alone the two fight, and the fight is not subtle: any orbit
+ * or zoom is thrown away the next time the pane changes size, which on a phone
+ * is constantly. So once `adjusted` is set nothing here touches the camera
+ * again, and Reset view is what hands framing back.
+ */
+let adjusted = false;
+
 function frameCamera(): void {
+  if (adjusted) return;
   const word = captionEl;
   const previous = word.textContent;
   // Measure at a worst case: the caption is empty while idle and grows when a
@@ -100,6 +140,10 @@ function frameCamera(): void {
     fitToChrome({
       container: mount,
       camera: engine.camera,
+      // Handing the controls over keeps their target on the framed centre, so
+      // a first drag orbits around the avatar rather than swinging it out of
+      // shot around a stale origin.
+      controls,
       top: captionRoot,
       bottom: null, // nothing floats over the bottom of this pane
       feetY: AVATAR.signingFloorY,
@@ -111,6 +155,20 @@ function frameCamera(): void {
     word.textContent = previous;
   }
 }
+
+// 'start' fires on a real pointer gesture only — unlike 'change', which
+// fitToChrome's own controls.update() would raise and which would therefore
+// disable auto-framing the instant the page loaded.
+controls.addEventListener('start', () => {
+  adjusted = true;
+  resetViewBtn.hidden = false;
+});
+
+resetViewBtn.addEventListener('click', () => {
+  adjusted = false;
+  frameCamera();
+  resetViewBtn.hidden = true;
+});
 
 frameCamera();
 try {

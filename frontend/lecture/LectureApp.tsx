@@ -388,6 +388,23 @@ export function LectureApp() {
           <span className="pane-label">signing</span>
           <div id="avatar" className="absolute inset-0" />
           {/*
+            Hidden until the viewer actually moves the camera — lecture/main.ts
+            unhides it on the controls' first gesture. Always mounted, like
+            everything else main.ts resolves by id.
+
+            Its own element rather than a corner of the canvas, because the
+            canvas is what OrbitControls listens on: a button drawn inside it
+            would start an orbit on the way to being tapped.
+          */}
+          <button
+            id="reset-view"
+            type="button"
+            hidden
+            className="absolute right-2.5 bottom-2.5 z-[7] cursor-pointer rounded-full border border-line bg-white/85 px-3 py-1.5 text-[11px] font-semibold tracking-[0.04em] text-ink shadow-[0_2px_10px_-2px_rgba(22,19,15,0.28)] backdrop-blur-md hover:bg-white"
+          >
+            Reset view
+          </button>
+          {/*
             Above the head, matching the other two pipelines — it used to sit at
             the bottom of this pane, where it covered the avatar's feet. The
             camera reserves this band (see frameCamera in lecture/main.ts), so
