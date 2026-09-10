@@ -11,7 +11,7 @@ const MIN_STAGE = 160;            // the panes never collapse to nothing
 /** Remembered per browser so a layout survives a reload. Never leaves the device. */
 const STORAGE_KEY = 'lecture.layout.v1';
 
-function loadLayout(): { split: number; transcript: number } {
+function loadLayout(): { split: number; transcript: number; sourceOpen: boolean } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -23,6 +23,10 @@ function loadLayout(): { split: number; transcript: number } {
         return {
           split: Math.min(1 - MIN_SPLIT, Math.max(MIN_SPLIT, v.split)),
           transcript: Math.max(MIN_TRANSCRIPT, v.transcript),
+          // Older saves predate this and have no opinion; open is the honest
+          // default, since a page that hid its only file picker on first run
+          // would be unusable.
+          sourceOpen: typeof v.sourceOpen === 'boolean' ? v.sourceOpen : true,
         };
       }
     }
@@ -30,7 +34,7 @@ function loadLayout(): { split: number; transcript: number } {
     // Private windows and blocked site data throw on access rather than
     // returning null; a missing layout is not worth failing the page over.
   }
-  return { split: DEFAULT_SPLIT, transcript: DEFAULT_TRANSCRIPT };
+  return { split: DEFAULT_SPLIT, transcript: DEFAULT_TRANSCRIPT, sourceOpen: true };
 }
 
 /**
@@ -233,22 +237,58 @@ export function LectureApp() {
         </span>
         <span id="status" className="min-h-[18px] text-[13px] text-accent" />
         <input id="file" type="file" accept="video/*" className="hidden" />
-        <input
-          id="url"
-          type="url"
-          placeholder="…or paste a video URL"
-          spellCheck={false}
-          className="min-w-0 max-w-[260px] flex-[1_1_200px] rounded-full border border-line bg-white px-3.5 py-2 text-[13px] text-ink focus:outline-2 focus:-outline-offset-1 focus:outline-accent/35"
-        />
-        <button id="fetch" type="button" className="lecture-btn">
-          Fetch
+
+        {/*
+          Choosing a source is a once-per-lecture job, and on a phone it cost a
+          fifth of the screen to leave on show: measured at 375x812 the header
+          wrapped to three rows and stood 175px tall, which left the avatar pane
+          213px. Collapsed it is one row, and the panes get that space back.
+
+          Hidden with a class, never unmounted — main.ts captured #url, #fetch,
+          #choose and #transcribe at module load and would go on writing to
+          detached nodes. Same reason as the details panel below.
+        */}
+        <div
+          id="source-row"
+          /* display:contents when open, so the four controls keep wrapping as
+             direct children of the header's flex row and the open layout is
+             byte-for-byte what it was before the wrapper existed. */
+          className={layout.sourceOpen ? 'contents' : 'hidden'}
+        >
+          <input
+            id="url"
+            type="url"
+            placeholder="…or paste a video URL"
+            spellCheck={false}
+            className="min-w-0 max-w-[260px] flex-[1_1_200px] rounded-full border border-line bg-white px-3.5 py-2 text-[13px] text-ink focus:outline-2 focus:-outline-offset-1 focus:outline-accent/35"
+          />
+          <button id="fetch" type="button" className="lecture-btn">
+            Fetch
+          </button>
+          <button id="choose" type="button" className="lecture-btn">
+            Choose video…
+          </button>
+          <button id="transcribe" type="button" disabled className="lecture-btn lecture-btn--primary">
+            Transcribe
+          </button>
+        </div>
+
+        <button
+          type="button"
+          className="lecture-btn"
+          aria-expanded={layout.sourceOpen}
+          aria-controls="source-row"
+          onClick={() => setLayout((v) => ({ ...v, sourceOpen: !v.sourceOpen }))}
+        >
+          Source
+          <span
+            aria-hidden="true"
+            className={`ml-1.5 inline-block text-[9px] transition-transform duration-200 ease-signer ${layout.sourceOpen ? 'rotate-180' : ''}`}
+          >
+            ▾
+          </span>
         </button>
-        <button id="choose" type="button" className="lecture-btn">
-          Choose video…
-        </button>
-        <button id="transcribe" type="button" disabled className="lecture-btn lecture-btn--primary">
-          Transcribe
-        </button>
+
         <button
           ref={triggerRef}
           type="button"
