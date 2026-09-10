@@ -14,6 +14,16 @@
  * because index.html and signer.html each position and style that class
  * themselves. The menu is appended to <body> and placed from the trigger's box,
  * so neither page's CSS has to know it exists.
+ *
+ * `clearOf` is why this does its own vertical placement. The trigger is pinned
+ * bottom-right, and on a phone every page docks a full-width bar in that same
+ * band: measured at 375x812, index.html put the pill straight on top of the
+ * Sign button (x 299-355 against 273-347) and signer.html put it across the
+ * vocabulary line. The bars are not a fixed height either — signer's wraps to
+ * three or four lines depending on how many signs are loaded — so a hard offset
+ * in CSS would be wrong the moment the content changed. It measures instead,
+ * and only lifts when the two would actually touch, so a desktop window where
+ * they never meet keeps the corner placement the CSS asks for.
  */
 import { APP_CONFIG } from '../config/appConfig';
 
@@ -24,6 +34,11 @@ export interface PlaybackSpeedControlOptions {
   speeds?: readonly number[];
   /** Initial speed. Defaults to config.yaml animation.default_speed. */
   initial?: number;
+  /**
+   * Selector for an element the trigger must not sit on top of — typically the
+   * page's bottom bar. When they would overlap, the trigger rises just above it.
+   */
+  clearOf?: string;
 }
 
 const DEFAULT_SPEEDS = APP_CONFIG.speeds as readonly number[];
@@ -116,10 +131,14 @@ export class PlaybackSpeedControl {
   private index: number;
   private readonly onChange: (speed: number) => void;
   private open = false;
+  private readonly clearOf: string | null;
+  /** Guards keepClear() and reposition() from calling each other forever. */
+  private repositioning = false;
 
   constructor(parent: HTMLElement, options: PlaybackSpeedControlOptions) {
     this.speeds = options.speeds ?? DEFAULT_SPEEDS;
     this.onChange = options.onChange;
+    this.clearOf = options.clearOf ?? null;
     const initial = options.initial ?? APP_CONFIG.defaultSpeed;
     this.index = Math.max(0, this.speeds.indexOf(initial));
 
@@ -180,6 +199,34 @@ export class PlaybackSpeedControl {
     this.refresh();
     parent.append(this.button);
     document.body.append(this.menu);
+
+    // The bar this avoids changes height on its own — the vocabulary line wraps
+    // as signs load — so watch it rather than only the window.
+    if (this.clearOf) {
+      const avoid = document.querySelector(this.clearOf);
+      if (avoid) new ResizeObserver(() => this.keepClear()).observe(avoid);
+      this.keepClear();
+    }
+  }
+
+  /**
+   * Lift the trigger above the page's bottom bar when it would overlap it.
+   *
+   * Reads the bar's CURRENT box every time, so nothing here assumes a height.
+   * Clearing `bottom` first matters: without it the second call measures the
+   * box this method already moved and the button walks up the screen.
+   */
+  private keepClear(): void {
+    if (!this.clearOf) return;
+    const avoid = document.querySelector(this.clearOf);
+    if (!avoid) return;
+    this.button.style.bottom = '';
+    const gap = 12;
+    const me = this.button.getBoundingClientRect();
+    const bar = avoid.getBoundingClientRect();
+    const overlaps = me.left < bar.right && bar.left < me.right && me.top < bar.bottom && bar.top < me.bottom;
+    if (overlaps) this.button.style.bottom = `${Math.round(window.innerHeight - bar.top + gap)}px`;
+    if (this.open) this.reposition();
   }
 
   /** Current speed multiplier (e.g. 0.25, 1, 5). */
@@ -218,6 +265,12 @@ export class PlaybackSpeedControl {
   }
 
   private reposition(): void {
+    // Placement depends on the trigger's box, so settle that first.
+    if (this.clearOf && !this.repositioning) {
+      this.repositioning = true;
+      this.keepClear();
+      this.repositioning = false;
+    }
     if (this.open) this.place();
   }
 

@@ -157,6 +157,7 @@ try {
 // Playback speed (bottom-right button). Scales both mixer timeScale and
 // sequencer hold timing so animation + caption stay in sync.
 new PlaybackSpeedControl(document.body, {
+  clearOf: '.vrma-bar',
   onChange: (speed) => {
     avatar.setPlaybackRate(speed);
     sequencer.setPlaybackRate(speed);

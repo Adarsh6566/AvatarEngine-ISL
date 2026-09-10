@@ -288,6 +288,7 @@ const activity = new ActivityIndicator(document.body);
 // Speeds come from config.yaml (animation.playback_speeds) via APP_CONFIG, so
 // both pipelines cycle through the same 1x-5x steps.
 new PlaybackSpeedControl(document.body, {
+  clearOf: '.bar',
   onChange: (speed) => {
     playbackRate = speed;
   },
