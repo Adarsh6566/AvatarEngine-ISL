@@ -106,6 +106,8 @@ export default defineConfig({
         'skeleton-viewer': 'skeleton-viewer.html',
         signer: 'signer.html',
         lecture: 'lecture.html',
+        // Presentation shell — frames the pages at phone size for projecting.
+        demo: 'demo.html',
       },
       output: {
         manualChunks(id) {
