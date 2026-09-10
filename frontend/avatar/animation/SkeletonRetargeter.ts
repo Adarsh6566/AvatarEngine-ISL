@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { measureArms, solveElbow, type ArmRigs } from './armIK';
+import { AXIS_FOLLOW, closestPairAxis, pushToClear } from './handClearance';
 import { VRMHumanBoneName, type VRM } from '@pixiv/three-vrm';
 
 /**
@@ -144,6 +145,50 @@ export const DRIVES: Drive[] = [
   ...sideDrives('Right', 'r'),
 ];
 
+/** Each driven bone's parent, for walking rest offsets back to the hips. */
+const PARENT_OF: ReadonlyMap<VRMHumanBoneName, VRMHumanBoneName> = new Map(
+  DRIVES.map((d) => [d.bone, d.parent] as const),
+);
+
+/** Shoulder→hand, in chain order. Rebuilt when hand clearance moves a wrist. */
+const ARM_CHAIN: Readonly<Record<'l' | 'r', readonly Drive[]>> = {
+  l: DRIVES.filter((d) => d.bone === V.LeftUpperArm || d.bone === V.LeftLowerArm || d.bone === V.LeftHand),
+  r: DRIVES.filter((d) => d.bone === V.RightUpperArm || d.bone === V.RightLowerArm || d.bone === V.RightHand),
+};
+
+/** Every bone of one hand, as collision points. Distals also contribute a tip. */
+const HAND_POINTS: Readonly<Record<'l' | 'r', readonly VRMHumanBoneName[]>> = {
+  l: [
+    V.LeftHand,
+    V.LeftThumbProximal, V.LeftThumbDistal,
+    V.LeftIndexProximal, V.LeftIndexIntermediate, V.LeftIndexDistal,
+    V.LeftMiddleProximal, V.LeftMiddleIntermediate, V.LeftMiddleDistal,
+    V.LeftRingProximal, V.LeftRingIntermediate, V.LeftRingDistal,
+    V.LeftLittleProximal, V.LeftLittleIntermediate, V.LeftLittleDistal,
+  ],
+  r: [
+    V.RightHand,
+    V.RightThumbProximal, V.RightThumbDistal,
+    V.RightIndexProximal, V.RightIndexIntermediate, V.RightIndexDistal,
+    V.RightMiddleProximal, V.RightMiddleIntermediate, V.RightMiddleDistal,
+    V.RightRingProximal, V.RightRingIntermediate, V.RightRingDistal,
+    V.RightLittleProximal, V.RightLittleIntermediate, V.RightLittleDistal,
+  ],
+};
+
+/** Fingertips are not bones; extend each distal by its own length to reach one. */
+const DISTAL_TIPS: ReadonlySet<VRMHumanBoneName> = new Set([
+  V.LeftThumbDistal, V.LeftIndexDistal, V.LeftMiddleDistal, V.LeftRingDistal, V.LeftLittleDistal,
+  V.RightThumbDistal, V.RightIndexDistal, V.RightMiddleDistal, V.RightRingDistal, V.RightLittleDistal,
+]);
+
+/** Knuckle pairs used to size the auto clearance from the rig's own hand. */
+const KNUCKLE_PITCH: readonly (readonly [VRMHumanBoneName, VRMHumanBoneName])[] = [
+  [V.LeftIndexProximal, V.LeftMiddleProximal],
+  [V.LeftMiddleProximal, V.LeftRingProximal],
+  [V.LeftRingProximal, V.LeftLittleProximal],
+];
+
 /** Lower-body bones, skipped unless driveLegs. */
 const LEG_BONES: ReadonlySet<VRMHumanBoneName> = new Set([
   V.LeftUpperLeg, V.LeftLowerLeg, V.RightUpperLeg, V.RightLowerLeg,
@@ -214,6 +259,17 @@ export interface RetargetOptions {
    * escape hatch for comparing the two.
    */
   armIK: boolean;
+  /**
+   * Least distance allowed between the two hands' bones, in hip→head units.
+   * Reached by pushing the wrist targets apart; see handClearance.ts.
+   *
+   * 'auto' measures it from THIS rig — 1.35x the mean gap between adjacent
+   * knuckles, which is a finger's width plus enough for the palm behind it, so
+   * a differently proportioned avatar gets its own number rather than one tuned
+   * to this model. 0 disables the pass. Requires armIK, which is what makes the
+   * wrist a target that can be moved.
+   */
+  handClearance: number | 'auto';
 }
 
 export const DEFAULT_RETARGET_OPTIONS: RetargetOptions = {
@@ -227,11 +283,21 @@ export const DEFAULT_RETARGET_OPTIONS: RetargetOptions = {
   fingerMode: 'full',
   fingerSmoothing: 0,
   armIK: true,
+  handClearance: 'auto',
 };
+
+/** Ceiling on the hand-clearance push, in hip→head units (4.8cm on this rig).
+ *  A safety limit, not an operating point: the worst of the seventeen signs
+ *  asks for 4.1cm. A sign that genuinely holds the hands together should end up
+ *  looking crowded rather than pulled apart, so the pass stops here instead of
+ *  reshaping the gesture to satisfy the geometry. */
+const MAX_CLEARANCE_PUSH = 0.09;
 
 const _c = new THREE.Vector3();
 const _ikL = new THREE.Vector3();
 const _ikR = new THREE.Vector3();
+const _axis = new THREE.Vector3();
+const _shift = new THREE.Vector3();
 
 export class SkeletonRetargeter {
   private readonly options: RetargetOptions;
@@ -240,6 +306,12 @@ export class SkeletonRetargeter {
   private armRigs: ArmRigs | null = null;
   /** Rest bone directions (normalized), captured from the VRM T-pose. */
   private readonly restDir = new Map<VRMHumanBoneName, THREE.Vector3>();
+  /** Rest offset from each driven bone's PARENT, for forward kinematics. */
+  private readonly restLocal = new Map<VRMHumanBoneName, THREE.Vector3>();
+  /** Resolved hand clearance in hip->head units; 0 when the pass is off. */
+  private clearance = 0;
+  /** Smoothed direction the hands are being pushed apart along, while in contact. */
+  private pushAxis: THREE.Vector3 | null = null;
   /** Rest across-axis, for the bones that declare one (the hands). */
   private readonly restAcross = new Map<VRMHumanBoneName, THREE.Vector3>();
   private readonly rootParentWorldQ = new THREE.Quaternion();
@@ -260,6 +332,7 @@ export class SkeletonRetargeter {
    */
   reset(): void {
     this.prevLocal.clear();
+    this.pushAxis = null;
   }
 
   /** True once captureRest() has measured a VRM. applyPose is a no-op before then. */
@@ -304,10 +377,96 @@ export class SkeletonRetargeter {
       const b = worldPos(d.restChild);
       if (a && b) this.restDir.set(d.bone, b.clone().sub(a).normalize());
     }
+    // Rest offsets for the FK used by the hand-clearance pass. Taken from the
+    // bone's DRIVE parent rather than its rig parent: anything between them
+    // (a shoulder, an upper chest) is never driven, so it stays at rest and its
+    // contribution is already inside this constant offset.
+    //
+    // Divided by hip→head, so the FK lands in the SAME units as the capture and
+    // as the clearance. Leaving them in the rig's metres silently delivered only
+    // `span` of every push — 53% on this avatar — and the clearance pass stalled
+    // four frames short no matter how far its cap was raised.
+    const span = this.restSpan(worldPos);
+    this.restLocal.clear();
+    for (const d of DRIVES) {
+      const self = worldPos(d.bone);
+      const par = worldPos(d.parent);
+      if (self && par) this.restLocal.set(d.bone, self.clone().sub(par).divideScalar(span));
+    }
+
     this.armRigs = measureArms((b) => worldPos(b as VRMHumanBoneName));
+    this.clearance = this.resolveClearance(worldPos, span);
     const hipsNode = node(V.Hips);
     hipsNode?.parent?.getWorldQuaternion(this.rootParentWorldQ);
     this.captured = true;
+  }
+
+  /**
+   * Hand clearance in hip→head units, measured from this rig when set to 'auto'.
+   *
+   * The knuckle pitch is the only number on the model that says how thick its
+   * fingers are, and 1.35x it leaves a finger's width plus a little for the palm
+   * behind — 2.5cm on this avatar, against knuckles 1.8cm apart.
+   */
+  private restSpan(worldPos: (b: VRMHumanBoneName) => THREE.Vector3 | null): number {
+    const hips = worldPos(V.Hips);
+    const head = worldPos(V.Head);
+    const span = hips && head ? head.distanceTo(hips) : 0;
+    return span > 1e-6 ? span : 1;
+  }
+
+  private resolveClearance(
+    worldPos: (b: VRMHumanBoneName) => THREE.Vector3 | null,
+    span: number,
+  ): number {
+    const asked = this.options.handClearance;
+    if (asked !== 'auto') return Math.max(0, asked);
+    let total = 0;
+    let n = 0;
+    for (const [a, b] of KNUCKLE_PITCH) {
+      const pa = worldPos(a);
+      const pb = worldPos(b);
+      if (pa && pb) { total += pa.distanceTo(pb) / span; n++; }
+    }
+    return n > 0 ? (total / n) * 1.35 : 0;
+  }
+
+  /**
+   * One bone's local rotation, or null when this frame cannot drive it.
+   *
+   * Split out because the hand-clearance pass rebuilds the three arm bones a
+   * second time against moved wrist targets, and must do it by exactly the same
+   * arithmetic. Smoothing deliberately stays with the caller: running it twice
+   * on one frame would advance the finger history twice.
+   */
+  private boneRotation(
+    d: Drive,
+    Rparent: THREE.Quaternion,
+    pos: (name: string) => THREE.Vector3 | null,
+  ): THREE.Quaternion | null {
+    const rest = this.restDir.get(d.bone);
+    const a = pos(d.from);
+    const b = pos(d.to);
+    if (!rest || !a || !b) return null;
+    _c.copy(b).sub(a);
+    if (_c.lengthSq() < 1e-8) return null;
+
+    const inv = Rparent.clone().invert();
+    const obsLocal = _c.clone().applyQuaternion(inv).normalize();
+    let qLocal = new THREE.Quaternion().setFromUnitVectors(rest, obsLocal);
+
+    // Hand: recover roll too, so the palm faces where the signer's did. The
+    // swing above is the fallback when the knuckles are missing or collapse
+    // onto the middle axis (a fist seen end-on), where no plane is defined.
+    const restAcross = this.restAcross.get(d.bone);
+    const acrossA = d.acrossFrom ? pos(d.acrossFrom) : null;
+    const acrossB = d.acrossTo ? pos(d.acrossTo) : null;
+    if (restAcross && acrossA && acrossB) {
+      const obsAcrossLocal = acrossB.clone().sub(acrossA).applyQuaternion(inv);
+      const full = orientationBetween(rest, restAcross, obsLocal, obsAcrossLocal);
+      if (full) qLocal = full;
+    }
+    return qLocal;
   }
 
   /**
@@ -397,34 +556,10 @@ export class SkeletonRetargeter {
         Rworld.set(d.bone, Rparent); // finger bone left at rest
         continue;
       }
-      const rest = this.restDir.get(d.bone);
-      const a = pos(d.from);
-      const b = pos(d.to);
-      if (!rest || !a || !b) {
+      let qLocal = this.boneRotation(d, Rparent, pos);
+      if (!qLocal) {
         Rworld.set(d.bone, Rparent); // undriven this frame: inherit parent frame, stay at rest
         continue;
-      }
-      _c.copy(b).sub(a);
-      if (_c.lengthSq() < 1e-8) {
-        Rworld.set(d.bone, Rparent);
-        continue;
-      }
-      const obsLocal = _c.clone().applyQuaternion(Rparent.clone().invert()).normalize();
-      let qLocal = new THREE.Quaternion().setFromUnitVectors(rest, obsLocal);
-
-      // Hand: recover roll too, so the palm faces where the signer's did. The
-      // swing above is the fallback when the knuckles are missing or collapse
-      // onto the middle axis (a fist seen end-on), where no plane is defined.
-      const restAcross = this.restAcross.get(d.bone);
-      const acrossA = d.acrossFrom ? pos(d.acrossFrom) : null;
-      const acrossB = d.acrossTo ? pos(d.acrossTo) : null;
-      if (restAcross && acrossA && acrossB) {
-        const obsAcrossLocal = acrossB
-          .clone()
-          .sub(acrossA)
-          .applyQuaternion(Rparent.clone().invert());
-        const full = orientationBetween(rest, restAcross, obsLocal, obsAcrossLocal);
-        if (full) qLocal = full;
       }
 
       // Damp finger jitter by blending with the previous frame's rotation.
@@ -438,7 +573,115 @@ export class SkeletonRetargeter {
       Rworld.set(d.bone, Rparent.clone().multiply(qLocal));
     }
 
+    // Hands out of each other. The wrists are on target by here and the hands
+    // can still be inside one another, because a wrist is a point and a hand is
+    // not — see handClearance.ts.
+    if (this.clearance > 0 && o.armIK && this.armRigs && ikL && ikR) {
+      this.clearHands(pose, Rworld, captured, ikL, ikR);
+    }
+
     vrm.humanoid.setNormalizedPose(pose);
     vrm.humanoid.update();
+  }
+
+  /**
+   * Push the wrist targets apart until the hands clear, and rebuild both arms.
+   *
+   * Only six bones are touched. The fingers are left exactly as computed: their
+   * rotations are relative to the hand, and the hand's world orientation is the
+   * captured direction, which a moved elbow cannot change — so the whole hand
+   * travels rigidly with its wrist and nothing downstream needs recomputing.
+   */
+  private clearHands(
+    pose: Partial<Record<VRMHumanBoneName, { rotation: [number, number, number, number] }>>,
+    Rworld: Map<VRMHumanBoneName, THREE.Quaternion>,
+    captured: (name: string) => THREE.Vector3 | null,
+    ikL: THREE.Vector3,
+    ikR: THREE.Vector3,
+  ): void {
+    // Forward kinematics in the Rworld frame. Distances are what this pass
+    // reads, and those are invariant to where the root sits, so the hips go at
+    // the origin and no rig update is needed to measure.
+    const fkCache = new Map<VRMHumanBoneName, THREE.Vector3>([[V.Hips, new THREE.Vector3()]]);
+    const identity = new THREE.Quaternion();
+    const fk = (bone: VRMHumanBoneName): THREE.Vector3 => {
+      const hit = fkCache.get(bone);
+      if (hit) return hit;
+      const parent = PARENT_OF.get(bone);
+      const offset = this.restLocal.get(bone);
+      const base = parent ? fk(parent) : new THREE.Vector3();
+      const out = !parent || !offset
+        ? base.clone()
+        : base.clone().add(offset.clone().applyQuaternion(Rworld.get(parent) ?? identity));
+      fkCache.set(bone, out);
+      return out;
+    };
+    const points = (side: 'l' | 'r'): THREE.Vector3[] => {
+      const out: THREE.Vector3[] = [];
+      for (const bone of HAND_POINTS[side]) {
+        if (!this.restLocal.has(bone)) continue;
+        const p = fk(bone);
+        out.push(p);
+        // A fingertip is not a bone. Extending the distal by its own length
+        // reaches one, and the tips are what actually meet first.
+        const offset = this.restLocal.get(bone);
+        if (DISTAL_TIPS.has(bone) && offset) {
+          out.push(p.clone().add(offset.clone().applyQuaternion(Rworld.get(bone) ?? identity)));
+        }
+      }
+      return out;
+    };
+
+    const left = points('l');
+    const right = points('r');
+    if (left.length === 0 || right.length === 0) return;
+
+    // Push along the closest pair's own direction — the wrist axis separates
+    // the hands sideways while they collide in depth. Smoothed toward it rather
+    // than snapped, because the closest pair jumps between bones; see
+    // handClearance.ts.
+    const raw = closestPairAxis(left, right, this.clearance, _axis);
+    if (!raw) { this.pushAxis = null; return; } // clear: forget the axis too
+    if (!this.pushAxis) {
+      this.pushAxis = raw.clone();
+    } else {
+      this.pushAxis.lerp(raw, AXIS_FOLLOW);
+      // A near-cancelling blend has no direction left to normalise. That means
+      // the pair genuinely reversed, so follow it rather than keep a stale axis.
+      if (this.pushAxis.lengthSq() < 0.01) this.pushAxis.copy(raw);
+      else this.pushAxis.normalize();
+    }
+
+    const delta = pushToClear(left, right, this.pushAxis, this.clearance, MAX_CLEARANCE_PUSH);
+    if (delta <= 0) return;
+    _axis.copy(this.pushAxis);
+
+    const rebuild = (side: 'l' | 'r', elbowHint: THREE.Vector3, sign: number): void => {
+      const rig = side === 'l' ? this.armRigs!.left : this.armRigs!.right;
+      const shoulder = captured(`${side}Shoulder`);
+      const wrist = captured(`${side}Wrist`);
+      if (!shoulder || !wrist) return;
+      _shift.copy(_axis).multiplyScalar((sign * delta) / 2);
+      const target = wrist.clone().add(_shift);
+      const elbow = solveElbow(shoulder, target, elbowHint, rig.upper, rig.fore, new THREE.Vector3());
+      // Only the elbow and the wrist move; every other captured joint is read
+      // unchanged, so the hand's direction — and with it the whole handshape —
+      // is exactly what it was.
+      const moved = (name: string): THREE.Vector3 | null => {
+        if (name === `${side}Elbow`) return elbow;
+        if (name === `${side}Wrist`) return target;
+        return captured(name);
+      };
+      let Rparent = Rworld.get(V.Chest) ?? identity;
+      for (const d of ARM_CHAIN[side]) {
+        const q = this.boneRotation(d, Rparent, moved);
+        if (!q) { Rparent = Rworld.get(d.bone) ?? Rparent; continue; }
+        pose[d.bone] = { rotation: [q.x, q.y, q.z, q.w] };
+        Rparent = Rparent.clone().multiply(q);
+        Rworld.set(d.bone, Rparent);
+      }
+    };
+    rebuild('l', ikL, +1);
+    rebuild('r', ikR, -1);
   }
 }

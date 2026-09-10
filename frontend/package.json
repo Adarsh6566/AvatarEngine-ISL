@@ -9,7 +9,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "android:sync": "npm run build && cap sync android",
-    "android:open": "npm run build && cap sync android && cap open android"
+    "android:open": "npm run build && cap sync android && cap open android",
+    "test": "node --import ./scripts/ts-resolve.mjs --test avatar/animation/handClearance.test.ts"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.1",
