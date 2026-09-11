@@ -96,6 +96,22 @@ def two_way_split_quality(D: np.ndarray) -> tuple[float, list[int]]:
 
 SIGMA_LADDER = (0.0, 0.4, 0.6, 0.8, 1.0, 1.4, 2.0)
 
+# Absolute ceiling on arm jerk, in view units per frame squared.
+#
+# Parity with the takes cannot catch trembling, because it is relative and the
+# averaging already beats the takes comfortably on this measure: across all
+# seventeen signs the canonical came out at 0.16x to 0.76x its own takes' jerk,
+# so a take-relative bar is satisfied at sigma 0 every single time. The sign
+# that reads worst, `we`, is simply the one whose takes were shakiest — 0.76x,
+# the least improved of the set — and a relative rule rewards that with no
+# smoothing at all.
+#
+# So this is absolute. 0.011 is set just above the run of signs that already
+# read as steady (they land 0.0028-0.0110) and below the two that do not, `we`
+# at 0.0154 and `how_are_you` at 0.0145. It is a measured threshold, not a
+# derived one: it will want revisiting as the vocabulary grows.
+MAX_ARM_JERK = 0.011
+
 
 ARM_STAT_JOINTS = ("lElbow", "lWrist", "lHand", "rElbow", "rWrist", "rHand")
 
@@ -129,9 +145,19 @@ def _motion_stats(
         if not idx:
             continue
         step = np.linalg.norm(np.diff(data[:, idx, :], axis=0), axis=2).mean(axis=1)
+        # Second difference: how much the step CHANGES from frame to frame.
+        # This is the one that corresponds to what gets called shaky, and the
+        # step statistics above are nearly blind to it. On `we` the whole sigma
+        # ladder moved the arm median only 10% (0.0223 -> 0.0201) because that
+        # number is dominated by the sign's real travel — the arms cross the
+        # chest — while jerk fell 69% (0.0140 -> 0.0043) over the same ladder.
+        # Judging smoothing on step alone therefore reads a genuinely trembling
+        # clip as fine.
+        jerk = np.linalg.norm(np.diff(data[:, idx, :], n=2, axis=0), axis=2).mean(axis=1)
         steps[name] = {
             "median": float(np.median(step)),
             "p95": float(np.percentile(step, 95)),
+            "jerk": float(np.median(jerk)),
         }
     f = groups["fingers"]
     rng = float(np.mean(data[:, f, :].max(axis=0) - data[:, f, :].min(axis=0))) if f else 0.0
@@ -185,7 +211,14 @@ def choose_sigma(
     lengths: dict[str, float],
     fps: float,
 ) -> tuple[float, list[tuple[float, float, float]]]:
-    """Smallest smoothing width that leaves the canonical no jitterier than a take.
+    """Smallest smoothing width that is steady enough on two different tests.
+
+    Step statistics are held to PARITY with the takes — a relative bar, since
+    how fast a sign travels is a property of the sign. Jerk is held to an
+    ABSOLUTE ceiling, because relative is exactly what fails there: the
+    averaging beats the takes on jerk every time, so parity is free and the
+    shakiest source ships the shakiest clip. See MAX_ARM_JERK.
+
 
     Handshape carries meaning, so range of motion is what must be protected;
     jitter only has to reach parity with a typical take, not be minimised. The
@@ -210,6 +243,12 @@ def choose_sigma(
         for stat in ("median", "p95")
         if any(g in s for s in per_take)
     }
+    # Jerk is judged against a fixed ceiling instead of against the takes. See
+    # MAX_ARM_JERK: every canonical already beats its own takes on this, so a
+    # relative bar would be met at sigma 0 for all seventeen and the trembling
+    # ones would ship trembling.
+    if any("arm" in s for s in per_take):
+        targets[("arm", "jerk")] = MAX_ARM_JERK
     trace: list[tuple[float, float, float]] = []
     chosen = SIGMA_LADDER[-1]
     for s in SIGMA_LADDER:

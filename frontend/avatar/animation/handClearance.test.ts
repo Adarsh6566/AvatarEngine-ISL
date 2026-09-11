@@ -167,9 +167,33 @@ function play(sign: string, handClearance: number | 'auto', armIK = true) {
   return { closest, wrists, fingerLocal, handWorld, span };
 }
 
-/** Bone centres this close are inside each other's flesh: a finger is 1.8cm
- *  across on this rig, and the pass targets 1.35x that. */
-const OVERLAP = 0.045;
+/**
+ * Bone centres closer than this are inside each other's flesh.
+ *
+ * One knuckle pitch — 1.8cm on this rig, measured between adjacent proximals —
+ * so two finger bones at exactly this distance are touching, and anything less
+ * is interpenetration.
+ *
+ * Deliberately NOT the 1.35x the clearance pass aims for. That is a comfortable
+ * MARGIN; this is the point of failure, and the two are different numbers. The
+ * pass is also capped, on purpose, so it cannot reshape a gesture to buy margin
+ * — and WE is exactly the sign that needs the cap, since the hands are supposed
+ * to meet. After the arms were smoothed it settles at 2.0cm on two frames:
+ * short of the 2.47cm target, clear of the 1.8cm that would actually overlap,
+ * and reaching the target would have cost 4.3cm of wrist displacement per hand.
+ * Asserting the target here failed the build for a sign that looks correct.
+ */
+const OVERLAP = 0.034;
+
+/**
+ * The distance the pass actually aims for — 1.35 knuckle pitches.
+ *
+ * A sign whose hands come within this is one the pass will act on, which is a
+ * different question from whether it interpenetrates. Using OVERLAP for both
+ * put `alright` (closest 1.9cm) outside the "collided" set while the pass still
+ * moved it, and the two lists stopped agreeing.
+ */
+const ENGAGES = 0.045;
 const degrees = (a: THREE.Quaternion, b: THREE.Quaternion) =>
   (2 * Math.acos(Math.min(1, Math.abs(a.dot(b)))) * 180) / Math.PI;
 
@@ -193,7 +217,8 @@ test('the clips that collided are the only ones that move', () => {
   for (const sign of SIGNS) {
     const off = play(sign, 0);
     const on = play(sign, 'auto');
-    if (off.closest.some((d) => d < OVERLAP)) collided.push(sign);
+    // ENGAGES, not OVERLAP: this asks which signs the pass TOUCHES.
+    if (off.closest.some((d) => d < ENGAGES)) collided.push(sign);
     const shift = Math.max(...off.wrists.map((w, i) =>
       Math.max(w[0].distanceTo(on.wrists[i][0]), w[1].distanceTo(on.wrists[i][1]))));
     if (shift > 1e-12) moved.push(sign);

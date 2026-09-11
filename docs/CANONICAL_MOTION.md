@@ -267,13 +267,13 @@ alignment features in their own space would only prove they optimise themselves.
 | good_morning | 19 | 63 | 0.0 | 0.6676 | 0.7309 | **+8.7%** | 0.0139 / 0.0184 | 82% | 13% |
 | it | 20 | 54 | 0.0 | 0.8664 | 0.9429 | **+8.1%** | 0.0135 / 0.0157 | 79% | 12% |
 | he | 20 | 65 | 0.0 | 0.7675 | 0.8334 | **+7.9%** | 0.0140 / 0.0202 | 101% | 11% |
-| we | 18 | 59 | 0.0 | 0.7396 | 0.8031 | **+7.9%** | 0.0284 / 0.0297 | 92% | 14% |
-| how_are_you | 21 | 81 | 0.0 | 0.7863 | 0.8363 | **+6.0%** | 0.0210 / 0.0260 | 89% | 11% |
+| we | 18 | 59 | 0.6 | 0.7402 | 0.8031 | **+7.8%** | 0.0278 / 0.0297 | 91% | 14% |
+| how_are_you | 21 | 81 | 0.6 | 0.7867 | 0.8363 | **+5.9%** | 0.0210 / 0.0260 | 89% | 11% |
 | you | 21 | 63 | 0.0 | 0.7939 | 0.8431 | **+5.8%** | 0.0107 / 0.0179 | 90% | 9% |
 | i | 20 | 59 | 0.4 | 0.6774 | 0.7156 | **+5.3%** | 0.0131 / 0.0168 | 90% | 7% |
 | good_afternoon | 19 | 63 | 0.0 | 0.6663 | 0.7002 | **+4.8%** | 0.0187 / 0.0202 | 92% | 9% |
 | alright | 18 | 61 | 0.8 | 0.6910 | 0.7231 | **+4.4%** | 0.0119 / 0.0210 | 84% | 6% |
-| pleased | 18 | 60 | 0.0 | 0.6260 | 0.6542 | **+4.3%** | 0.0184 / 0.0205 | 88% | 13% |
+| pleased | 18 | 60 | 0.4 | 0.6262 | 0.6542 | **+4.3%** | 0.0171 / 0.0205 | 88% | 13% |
 | they | 21 | 68 | 0.0 | 0.8464 | 0.8815 | **+4.0%** | 0.0198 / 0.0214 | 94% | 16% |
 | you_plural | 18 | 72 | 1.4 | 0.7615 | 0.7835 | **+2.8%** | 0.0118 / 0.0211 | 84% | 5% |
 | thank_you | 20 | 58 | 2.0 | 0.6623 | 0.6790 | **+2.5%** | 0.0188 / 0.0249 | 89% | 11% |
@@ -520,6 +520,49 @@ seventeen clips and failed the random test at 4.51cm of 5.
 Still open: the capture under-elevates the arms (above), which IK cannot
 recover — it faithfully reaches the position that was measured, including when
 that position is too low.
+
+### Smoothing is chosen on two different bars
+
+The sigma ladder is walked from no smoothing upward, and the width that wins is
+the first one that passes both tests.
+
+**Step statistics are held to parity with the takes** — a relative bar, because
+how fast a sign travels is a property of the sign, not a fault.
+
+**Jerk is held to an absolute ceiling** (`MAX_ARM_JERK`), because relative is
+exactly what fails there. The averaging already beats the takes on jerk every
+single time: measured across all seventeen, the canonical came out at **0.16x to
+0.76x** its own takes' jerk, so a take-relative bar is satisfied at sigma 0 for
+every sign and a trembling clip ships trembling. The sign that read worst, `we`,
+was simply the one whose takes were shakiest — 0.76x, the least improved of the
+set — and a purely relative rule rewarded that with no smoothing at all.
+
+Jerk is the second difference: how much the per-frame step CHANGES from frame to
+frame. It is what gets called shaky, and the step statistics are nearly blind to
+it. On `we` the whole ladder moved the arm median only 10% (0.0223 -> 0.0201),
+because that number is dominated by the sign's real travel — the arms cross the
+chest — while jerk fell 69% over the same ladder (0.0140 -> 0.0043).
+
+The ceiling of 0.011 is measured, not derived: it sits just above the run of
+signs that already read as steady (0.0028-0.0110) and below the two that did
+not. It moved three clips and left **fourteen byte-identical**:
+
+| sign | sigma | arm jerk | range kept | gain vs best take |
+|---|---|---|---|---|
+| `we` | 0.0 -> **0.6** | 0.0154 -> **0.0099** (-36%) | 92% -> 91% | +7.9% -> +7.8% |
+| `how_are_you` | 0.0 -> **0.6** | 0.0145 -> **0.0090** (-38%) | 89% -> 89% | +6.0% -> +5.9% |
+| `pleased` | 0.0 -> **0.4** | 0.0110 -> **0.0097** (-12%) | 88% -> 88% | +4.3% -> +4.3% |
+
+Unlike the handshape trade in stage 10, this one is close to free: the worst
+clip went from the shakiest of the seventeen to fifth-steadiest for one point of
+range and a tenth of a point of score.
+
+One consequence at playback. Smoothing `we`'s arms moves the wrists slightly,
+and the hand-clearance pass can no longer reach its full 2.47cm margin on two
+frames — it settles at 2.0cm, which is clear of the 1.8cm that would actually
+interpenetrate. Reaching the margin would have taken 4.3cm of wrist
+displacement per hand, and `we` is precisely the sign whose hands are meant to
+meet, so the cap stopping short is the correct outcome rather than a shortfall.
 
 ---
 
