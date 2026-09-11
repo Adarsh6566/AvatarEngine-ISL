@@ -123,8 +123,11 @@
         overflow: hidden;
         background: var(--app-paper);
         display: grid;
-        /* status · app · tabs · home indicator */
-        grid-template-rows: 28px 1fr 52px 16px;
+        /* status · app · home indicator. The tab bar is NOT a row: it floats
+           over the app and slides away, so revealing it never resizes the
+           iframe. A row would have changed the app's viewport by 52px on every
+           reveal, reflowing the page and re-framing lecture's camera each time. */
+        grid-template-rows: 28px 1fr 16px;
         /* The fingertip stands in for the pointer everywhere on the glass, not
            just inside the app, or the arrow would reappear over the tab bar. */
         cursor: none;
@@ -143,6 +146,14 @@
       .glyphs { display: flex; align-items: center; gap: 5px; }
       iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--app-paper); }
       .tabbar {
+        position: absolute;
+        left: 0; right: 0;
+        bottom: 16px;            /* clear of the home indicator */
+        height: 52px;
+        z-index: 3;
+        translate: 0 100%;
+        opacity: 0;
+        transition: translate 220ms cubic-bezier(0.22, 0.61, 0.36, 1), opacity 160ms ease;
         display: grid;
         grid-auto-flow: column;
         grid-auto-columns: 1fr;
@@ -150,7 +161,12 @@
         border-top: 1px solid rgb(42 40 35 / 0.1);
         background: rgb(255 255 255 / 0.55);
         backdrop-filter: blur(12px);
+        box-shadow: 0 -8px 24px -12px rgb(22 19 15 / 0.35);
         user-select: none;
+      }
+      .screen[data-tabs='1'] .tabbar { translate: 0 0; opacity: 1; }
+      @media (prefers-reduced-motion: reduce) {
+        .tabbar { transition: opacity 160ms ease; }
       }
       .tab {
         appearance: none;
@@ -297,6 +313,23 @@
       /** Height of the status strip: the iframe's origin inside the glass. */
       const STATUS_H = 28;
 
+      /*
+       * Where the tab bar reveals and where it goes away again.
+       *
+       * A bar parked permanently across the bottom is chrome, not an app: it
+       * sits on the content and costs 52px of a 812px screen for something used
+       * once a minute. So it hides, and a reach toward the bottom edge brings it
+       * back — the same bargain a phone makes with its own navigation.
+       *
+       * Two thresholds rather than one, because a single line flickers the bar
+       * on and off while the pointer sits astride it. Revealing at 730 also puts
+       * it on screen just BEFORE the pointer arrives at the bar itself (which
+       * occupies 744-796), so it slides up to meet the finger rather than
+       * appearing underneath it.
+       */
+      const REVEAL_BELOW = 730;
+      const HIDE_ABOVE = 660;
+
       /* Scale the phone to the space the stage has, never past 1:1 — blowing a
          375px layout up to 600 would misrepresent how it looks. */
       const fit = () => {
@@ -328,6 +361,8 @@
       const place = (x, y) => {
         touch.style.translate = `${x}px ${y}px`;
         touch.dataset.on = '1';
+        if (y >= REVEAL_BELOW) glass.dataset.tabs = '1';
+        else if (y <= HIDE_ABOVE) glass.dataset.tabs = '0';
       };
       const ripple = (x, y) => {
         const r = document.createElement('div');
@@ -369,7 +404,11 @@
         const k = box.width / 375;
         place((e.clientX - box.left) / k, (e.clientY - box.top) / k);
       });
-      glass.addEventListener('pointerleave', () => { touch.dataset.on = '0'; press(false); });
+      glass.addEventListener('pointerleave', () => {
+        touch.dataset.on = '0';
+        press(false);
+        glass.dataset.tabs = '0';
+      });
       // Events inside the iframe do not bubble out here, so these only ever see
       // the shell's own strips — the tab bar included. Without them a tap on a
       // tab would be the one press in the whole device that gave no feedback.
@@ -386,6 +425,9 @@
         if (frame.getAttribute('src') === page) return; // already there: no reload
         frame.src = page;
         for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.page === page));
+        // Put it away on the way out, the way a tab bar does once it has been
+        // used — otherwise it hangs over the page you just switched to.
+        glass.dataset.tabs = '0';
       };
       for (const t of tabs) t.addEventListener('click', () => show(t.dataset.page));
 
