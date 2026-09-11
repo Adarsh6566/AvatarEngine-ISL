@@ -24,7 +24,12 @@
           asked for edge-to-edge, so putting them in strips rather than floating
           them over the app is what the APK actually looks like — and it avoids
           covering the pages' own top chrome, which an overlay would,
-        - the app therefore gets 375x768, which is a real handset content area.
+        - pages are switched from a TAB BAR inside the device, the way an app
+          does it. It lives in the shell rather than in any page, so it survives
+          a page load and stays put while the content under it changes — which
+          is what a native tab bar does and what three buttons floating above a
+          picture of a phone never did,
+        - the app therefore gets 375x716, which is a real handset content area.
 
       Deliberately NOT devtools' device toolbar, which puts its own chrome and a
       URL bar on the projector.
@@ -32,7 +37,9 @@
       Scaling is a CSS transform on the OUTSIDE of the iframe, so the app still
       believes it is 375 wide and lays itself out accordingly.
 
-      Keys: 1/2/3 switch page, r reloads the app, f hides the shell chrome.
+      There is no chrome outside the device: the phone is the whole interface,
+      so it takes the full height of the window on a projector. 1/2/3 and r
+      still work for a presenter who would rather not aim at a tab.
     -->
     <style>
       :root {
@@ -63,41 +70,13 @@
       body {
         margin: 0;
         display: grid;
-        grid-template-rows: auto 1fr;
         background: radial-gradient(120% 90% at 50% 0%, var(--stage) 0%, var(--stage-2) 100%);
         color: var(--ink);
         font: 500 14px/1.4 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
         overflow: hidden;
       }
 
-      header {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 14px;
-      }
-      body[data-chrome='off'] header { display: none; }
-
-      button {
-        font: inherit;
-        color: var(--ink);
-        background: var(--chip);
-        border: 1px solid rgb(0 0 0 / 0.08);
-        border-radius: 999px;
-        padding: 7px 15px;
-        cursor: pointer;
-        box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
-      }
-      button[aria-pressed='true'] {
-        background: var(--chip-on);
-        color: var(--stage);
-        border-color: transparent;
-      }
-      button:focus-visible { outline: 2px solid #b0451f; outline-offset: 2px; }
-      .hint { color: var(--ink-soft); font-size: 12px; margin-left: 10px; }
-
-      .stage { display: grid; place-items: center; min-height: 0; padding: 0 0 18px; }
+      .stage { display: grid; place-items: center; min-height: 0; padding: 18px; }
       /* transform: scale() paints smaller but leaves the LAYOUT box at full
          size, which left the shell carrying ~170px of hidden overflow and threw
          the centring off on short windows. The fitbox carries the scaled size so
@@ -144,7 +123,11 @@
         overflow: hidden;
         background: var(--app-paper);
         display: grid;
-        grid-template-rows: 28px 1fr 16px;
+        /* status · app · tabs · home indicator */
+        grid-template-rows: 28px 1fr 52px 16px;
+        /* The fingertip stands in for the pointer everywhere on the glass, not
+           just inside the app, or the arrow would reappear over the tab bar. */
+        cursor: none;
       }
       .statusbar {
         display: flex;
@@ -159,6 +142,35 @@
       .statusbar svg { display: block; }
       .glyphs { display: flex; align-items: center; gap: 5px; }
       iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--app-paper); }
+      .tabbar {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        align-items: center;
+        border-top: 1px solid rgb(42 40 35 / 0.1);
+        background: rgb(255 255 255 / 0.55);
+        backdrop-filter: blur(12px);
+        user-select: none;
+      }
+      .tab {
+        appearance: none;
+        border: 0;
+        background: none;
+        cursor: none;
+        display: grid;
+        justify-items: center;
+        gap: 3px;
+        padding: 0;
+        color: rgb(42 40 35 / 0.45);
+        font: 600 9.5px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        transition: color 140ms ease;
+      }
+      .tab svg { display: block; }
+      .tab[aria-selected='true'] { color: #b0451f; }
+      .tab:focus-visible { outline: 2px solid #b0451f; outline-offset: -3px; border-radius: 10px; }
+
       .homebar { display: grid; place-items: center; user-select: none; }
       .homebar span {
         width: 118px; height: 4px;
@@ -208,14 +220,7 @@
       }
     </style>
   </head>
-  <body data-chrome="on">
-    <header>
-      <button type="button" data-page="/signer.html" aria-pressed="true">Signer</button>
-      <button type="button" data-page="/lecture.html" aria-pressed="false">Lecture</button>
-      <button type="button" data-page="/index.html" aria-pressed="false">Authored</button>
-      <span class="hint">1 · 2 · 3 switch · r reload · f full</span>
-    </header>
-
+  <body>
     <div class="stage">
       <div class="fitbox">
         <div class="phone">
@@ -244,6 +249,34 @@
 
             <iframe id="app" src="/signer.html" title="avatar-engine on a phone-sized viewport"></iframe>
 
+            <div class="tabbar" role="tablist" aria-label="Pages">
+              <button class="tab" type="button" role="tab" data-page="/signer.html" aria-selected="true">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V11" />
+                  <path d="M12 10.5V4.5a1.5 1.5 0 0 1 3 0V11" />
+                  <path d="M15 10.5V6.5a1.5 1.5 0 0 1 3 0V13" />
+                  <path d="M9 11V9a1.5 1.5 0 0 0-3 0v5.5c0 3.6 2.6 6.5 6 6.5s6-2.6 6-6.5V13" />
+                </svg>
+                Signer
+              </button>
+              <button class="tab" type="button" role="tab" data-page="/lecture.html" aria-selected="false">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2.5" y="5" width="19" height="14" rx="3" />
+                  <path d="M10 9.5l5 2.5-5 2.5z" fill="currentColor" stroke="none" />
+                </svg>
+                Lecture
+              </button>
+              <button class="tab" type="button" role="tab" data-page="/index.html" aria-selected="false">
+                <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M4 18.5 9 5.5l5 13" />
+                  <path d="M5.8 14.5h6.4" />
+                  <path d="M20 9.5v9" />
+                  <path d="M20 5.8v.2" />
+                </svg>
+                Authored
+              </button>
+            </div>
+
             <div class="homebar"><span></span></div>
 
             <div class="touch" id="touch"></div>
@@ -259,7 +292,7 @@
       const glass = document.getElementById('glass');
       const touch = document.getElementById('touch');
       const clock = document.getElementById('clock');
-      const buttons = [...document.querySelectorAll('button[data-page]')];
+      const tabs = [...document.querySelectorAll('.tab')];
 
       /** Height of the status strip: the iframe's origin inside the glass. */
       const STATUS_H = 28;
@@ -267,9 +300,16 @@
       /* Scale the phone to the space the stage has, never past 1:1 — blowing a
          375px layout up to 600 would misrepresent how it looks. */
       const fit = () => {
-        const box = stage.getBoundingClientRect();
-        const k = Math.min(box.width / 397, box.height / 834, 1);
-        fitbox.style.setProperty('--k', k.toFixed(4));
+        // The CONTENT box, not the border box. getBoundingClientRect includes
+        // the stage's padding, so measuring it there made k too large by the
+        // padding and the shell carried real overflow — invisible only because
+        // body hides it, and the phone would have been clipped on a short
+        // window rather than scaled to fit.
+        const cs = getComputedStyle(stage);
+        const w = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const h = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+        const k = Math.min(w / 397, h / 834, 1);
+        fitbox.style.setProperty('--k', Math.max(k, 0.1).toFixed(4));
       };
       new ResizeObserver(fit).observe(stage);
       fit();
@@ -330,22 +370,33 @@
         place((e.clientX - box.left) / k, (e.clientY - box.top) / k);
       });
       glass.addEventListener('pointerleave', () => { touch.dataset.on = '0'; press(false); });
+      // Events inside the iframe do not bubble out here, so these only ever see
+      // the shell's own strips — the tab bar included. Without them a tap on a
+      // tab would be the one press in the whole device that gave no feedback.
+      glass.addEventListener('pointerdown', (e) => {
+        const box = glass.getBoundingClientRect();
+        const k = box.width / 375;
+        press(true);
+        ripple((e.clientX - box.left) / k, (e.clientY - box.top) / k);
+      });
+      glass.addEventListener('pointerup', () => press(false));
 
       // --- shell ------------------------------------------------------------
       const show = (page) => {
+        if (frame.getAttribute('src') === page) return; // already there: no reload
         frame.src = page;
-        for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.page === page));
+        for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.page === page));
       };
-      for (const b of buttons) b.addEventListener('click', () => show(b.dataset.page));
+      for (const t of tabs) t.addEventListener('click', () => show(t.dataset.page));
 
+      // Kept for a presenter who would rather not aim at a tab. Nothing on
+      // screen advertises them, because the device is the interface now.
       addEventListener('keydown', (e) => {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         const at = { '1': 0, '2': 1, '3': 2 }[e.key];
-        if (at !== undefined) show(buttons[at].dataset.page);
+        if (at !== undefined) show(tabs[at].dataset.page);
         else if (e.key === 'r') frame.src = frame.src;
-        else if (e.key === 'f') document.body.dataset.chrome =
-          document.body.dataset.chrome === 'on' ? 'off' : 'on';
       });
     </script>
   </body>
