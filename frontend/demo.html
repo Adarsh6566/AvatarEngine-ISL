@@ -6,23 +6,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>avatar-engine — phone demo</title>
     <!--
-      Presentation shell: the app in a phone-shaped frame, for projecting.
+      Presentation shell: the app running as a HANDSET, for projecting.
 
       The product is built for a cheap Android phone, and a talk about it should
-      show that shape rather than a maximised desktop window. This is the honest
-      way to do that from a laptop: a real 375x812 viewport in an iframe, running
-      the real pages off the same origin. Nothing is mocked and nothing is
-      screenshotted — what appears inside the frame is the app, at the size it
-      was designed for.
+      show that, not a maximised desktop window. The app inside is real — a true
+      375-wide viewport in a same-origin iframe, the actual pages, nothing mocked
+      and nothing screenshotted. What this file adds is the device around it, so
+      the audience reads it as a phone being used rather than a website in a
+      phone-shaped picture frame:
 
-      Deliberately NOT devtools' device toolbar, which shows its own chrome and
-      a URL bar on the projector.
+        - the pointer becomes a FINGERTIP over the screen. The desktop cursor is
+          hidden inside the iframe and a translucent disc tracks it instead,
+          pressing smaller and darker on pointerdown, with a tap ripple. This is
+          the single change that makes it read as touch,
+        - a status bar with a live clock, and a home indicator, in their own
+          strips. Capacitor renders web content BELOW the status bar unless it is
+          asked for edge-to-edge, so putting them in strips rather than floating
+          them over the app is what the APK actually looks like — and it avoids
+          covering the pages' own top chrome, which an overlay would,
+        - the app therefore gets 375x768, which is a real handset content area.
 
-      The frame scales with the window so it fills a projector without the page
-      scrolling, and scaling is a CSS transform on the OUTSIDE of the iframe, so
-      the app still believes it is 375 wide and lays itself out accordingly.
+      Deliberately NOT devtools' device toolbar, which puts its own chrome and a
+      URL bar on the projector.
 
-      Keys: 1/2/3 switch page, r reloads the frame, f hides the chrome.
+      Scaling is a CSS transform on the OUTSIDE of the iframe, so the app still
+      believes it is 375 wide and lays itself out accordingly.
+
+      Keys: 1/2/3 switch page, r reloads the app, f hides the shell chrome.
     -->
     <style>
       :root {
@@ -33,6 +43,9 @@
         --ink-soft: #6b665c;
         --chip: #ffffff;
         --chip-on: #2a2823;
+        /* The app's own paper, so the device strips match what it renders. */
+        --app-paper: #f2efe9;
+        --app-ink: #2a2823;
       }
       @media (prefers-color-scheme: dark) {
         :root:not([data-theme='light']) {
@@ -51,7 +64,6 @@
         margin: 0;
         display: grid;
         grid-template-rows: auto 1fr;
-        gap: 0;
         background: radial-gradient(120% 90% at 50% 0%, var(--stage) 0%, var(--stage-2) 100%);
         color: var(--ink);
         font: 500 14px/1.4 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -64,7 +76,6 @@
         justify-content: center;
         gap: 8px;
         padding: 14px;
-        transition: opacity 160ms ease;
       }
       body[data-chrome='off'] header { display: none; }
 
@@ -86,25 +97,20 @@
       button:focus-visible { outline: 2px solid #b0451f; outline-offset: 2px; }
       .hint { color: var(--ink-soft); font-size: 12px; margin-left: 10px; }
 
-      /* The stage centres the phone and scales it to whatever room is left. */
-      .stage {
-        display: grid;
-        place-items: center;
-        min-height: 0;
-        padding: 0 0 18px;
-      }
+      .stage { display: grid; place-items: center; min-height: 0; padding: 0 0 18px; }
       /* transform: scale() paints smaller but leaves the LAYOUT box at full
          size, which left the shell carrying ~170px of hidden overflow and threw
          the centring off on short windows. The fitbox carries the scaled size so
          layout and paint agree. */
-      .fitbox {
-        width: calc(397px * var(--k, 1));
-        height: calc(834px * var(--k, 1));
-      }
+      .fitbox { width: calc(397px * var(--k, 1)); height: calc(834px * var(--k, 1)); }
       .phone {
-        /* 375x812 plus 11px of bezel each side, scaled as one unit by --k. */
-        width: 375px;
-        height: 812px;
+        /* OUTER size: the 375x812 screen plus 11px of bezel on every side. The
+           screen is the number that matters — 375 is the handset width the app
+           is laid out for — so the device grows around it rather than the glass
+           shrinking to fit a 375 shell, which would have handed the app a 353px
+           viewport no real phone has. */
+        width: 397px;
+        height: 834px;
         transform: scale(var(--k, 1));
         transform-origin: top left;
         border-radius: 44px;
@@ -116,30 +122,89 @@
           0 8px 20px -8px rgb(0 0 0 / 0.35);
         position: relative;
       }
-      /* Speaker slot — enough to read as a phone, not a photoreal mockup. */
       .phone::after {
         content: '';
         position: absolute;
-        top: 21px;
-        left: 50%;
+        top: 21px; left: 50%;
         translate: -50% 0;
-        width: 56px;
-        height: 5px;
+        width: 56px; height: 5px;
         border-radius: 999px;
         background: rgb(255 255 255 / 0.18);
         pointer-events: none;
-        z-index: 2;
+        z-index: 4;
       }
-      iframe {
+
+      /* The glass: status strip, app, home strip — and the touch layer over all
+         three, so the fingertip does not vanish at the edges of the app. */
+      .screen {
+        position: relative;
         width: 375px;
         height: 812px;
-        border: 0;
         border-radius: 34px;
-        display: block;
-        background: #f2efe9;
+        overflow: hidden;
+        background: var(--app-paper);
+        display: grid;
+        grid-template-rows: 28px 1fr 16px;
+      }
+      .statusbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 16px 0 20px;
+        font: 600 11px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: 0.02em;
+        color: var(--app-ink);
+        user-select: none;
+      }
+      .statusbar svg { display: block; }
+      .glyphs { display: flex; align-items: center; gap: 5px; }
+      iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--app-paper); }
+      .homebar { display: grid; place-items: center; user-select: none; }
+      .homebar span {
+        width: 118px; height: 4px;
+        border-radius: 999px;
+        background: rgb(42 40 35 / 0.32);
+      }
+
+      /* Fingertip. pointer-events:none throughout — it must never eat a click
+         meant for the app underneath. */
+      .touch {
+        position: absolute;
+        top: 0; left: 0;
+        width: 34px; height: 34px;
+        margin: -17px 0 0 -17px;
+        border-radius: 50%;
+        background: rgb(42 40 35 / 0.16);
+        border: 1.5px solid rgb(42 40 35 / 0.3);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 120ms ease, transform 90ms ease, background-color 90ms ease;
+        z-index: 5;
+        will-change: transform;
+      }
+      .touch[data-on='1'] { opacity: 1; }
+      .touch[data-press='1'] {
+        transform: scale(0.68);
+        background: rgb(176 69 31 / 0.34);
+        border-color: rgb(176 69 31 / 0.55);
+      }
+      .ripple {
+        position: absolute;
+        width: 16px; height: 16px;
+        margin: -8px 0 0 -8px;
+        border-radius: 50%;
+        border: 2px solid rgb(176 69 31 / 0.5);
+        pointer-events: none;
+        z-index: 5;
+        animation: tap 480ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+      }
+      @keyframes tap {
+        from { transform: scale(0.4); opacity: 0.9; }
+        to   { transform: scale(4.2); opacity: 0; }
       }
       @media (prefers-reduced-motion: reduce) {
-        header { transition: none; }
+        .touch { transition: opacity 120ms ease; }
+        .ripple { animation-duration: 1ms; }
       }
     </style>
   </head>
@@ -152,17 +217,55 @@
     </header>
 
     <div class="stage">
-      <div class="fitbox"><div class="phone"><iframe id="screen" src="/signer.html" title="avatar-engine on a phone-sized viewport"></iframe></div></div>
+      <div class="fitbox">
+        <div class="phone">
+          <div class="screen" id="glass">
+            <div class="statusbar">
+              <span id="clock">9:41</span>
+              <span class="glyphs">
+                <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true" fill="currentColor">
+                  <rect x="0" y="7" width="3" height="4" rx="1" />
+                  <rect x="4.5" y="5" width="3" height="6" rx="1" />
+                  <rect x="9" y="2.5" width="3" height="8.5" rx="1" />
+                  <rect x="13.5" y="0" width="3" height="11" rx="1" opacity="0.35" />
+                </svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                  <path d="M1 4.1a9 9 0 0 1 13 0" />
+                  <path d="M3.6 6.7a5.4 5.4 0 0 1 7.8 0" />
+                  <circle cx="7.5" cy="9.4" r="0.9" fill="currentColor" stroke="none" />
+                </svg>
+                <svg width="25" height="11" viewBox="0 0 25 11" aria-hidden="true">
+                  <rect x="0.6" y="0.6" width="20.5" height="9.8" rx="3" fill="none" stroke="currentColor" stroke-opacity="0.45" />
+                  <rect x="2.2" y="2.2" width="14.5" height="6.6" rx="1.8" fill="currentColor" />
+                  <path d="M22.6 3.9v3.2a2.1 2.1 0 0 0 0-3.2Z" fill="currentColor" fill-opacity="0.5" />
+                </svg>
+              </span>
+            </div>
+
+            <iframe id="app" src="/signer.html" title="avatar-engine on a phone-sized viewport"></iframe>
+
+            <div class="homebar"><span></span></div>
+
+            <div class="touch" id="touch"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script type="module">
-      const frame = document.getElementById('screen');
+      const frame = document.getElementById('app');
       const stage = document.querySelector('.stage');
       const fitbox = document.querySelector('.fitbox');
+      const glass = document.getElementById('glass');
+      const touch = document.getElementById('touch');
+      const clock = document.getElementById('clock');
       const buttons = [...document.querySelectorAll('button[data-page]')];
 
-      /* Scale the phone to the space the stage actually has, never past 1:1 —
-         blowing a 375px layout up to 600 would misrepresent how it looks. */
+      /** Height of the status strip: the iframe's origin inside the glass. */
+      const STATUS_H = 28;
+
+      /* Scale the phone to the space the stage has, never past 1:1 — blowing a
+         375px layout up to 600 would misrepresent how it looks. */
       const fit = () => {
         const box = stage.getBoundingClientRect();
         const k = Math.min(box.width / 397, box.height / 834, 1);
@@ -171,24 +274,76 @@
       new ResizeObserver(fit).observe(stage);
       fit();
 
+      const tick = () => {
+        const d = new Date();
+        clock.textContent = `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}`;
+      };
+      tick();
+      setInterval(tick, 20_000);
+
+      // --- the fingertip ----------------------------------------------------
+      // Coordinates are in the phone's OWN pixels and the disc lives inside the
+      // scaled .phone, so the transform carries it for free — no need to undo
+      // the scale, which is what makes this correct at every window size.
+      const place = (x, y) => {
+        touch.style.translate = `${x}px ${y}px`;
+        touch.dataset.on = '1';
+      };
+      const ripple = (x, y) => {
+        const r = document.createElement('div');
+        r.className = 'ripple';
+        r.style.translate = `${x}px ${y}px`;
+        glass.append(r);
+        r.addEventListener('animationend', () => r.remove(), { once: true });
+      };
+      const press = (on) => { touch.dataset.press = on ? '1' : '0'; };
+
+      /* Same-origin, so the app's own document can be listened to directly.
+         Re-run on every load: switching page replaces the document and takes
+         the listeners with it. */
+      const wireApp = () => {
+        const doc = frame.contentDocument;
+        if (!doc) return;
+        const style = doc.createElement('style');
+        // The desktop arrow would sit next to the fingertip and give the game
+        // away, so it goes. Inputs keep a caret; only the pointer is hidden.
+        style.textContent = '*, *::before, *::after { cursor: none !important; }';
+        doc.head?.append(style);
+
+        doc.addEventListener('pointermove', (e) => place(e.clientX, e.clientY + STATUS_H), { passive: true });
+        doc.addEventListener('pointerdown', (e) => {
+          press(true);
+          ripple(e.clientX, e.clientY + STATUS_H);
+        }, { passive: true });
+        doc.addEventListener('pointerup', () => press(false), { passive: true });
+        doc.addEventListener('pointercancel', () => press(false), { passive: true });
+        doc.addEventListener('pointerleave', () => { touch.dataset.on = '0'; press(false); }, { passive: true });
+      };
+      frame.addEventListener('load', wireApp);
+      if (frame.contentDocument?.readyState === 'complete') wireApp();
+
+      // The strips are the parent's, not the app's, so they need their own
+      // handlers or the fingertip would blink out crossing them.
+      glass.addEventListener('pointermove', (e) => {
+        const box = glass.getBoundingClientRect();
+        const k = box.width / 375;
+        place((e.clientX - box.left) / k, (e.clientY - box.top) / k);
+      });
+      glass.addEventListener('pointerleave', () => { touch.dataset.on = '0'; press(false); });
+
+      // --- shell ------------------------------------------------------------
       const show = (page) => {
-        // Assigning src (not location) keeps each page a separate history entry
-        // of the iframe only, so the shell itself never navigates away.
         frame.src = page;
         for (const b of buttons) b.setAttribute('aria-pressed', String(b.dataset.page === page));
       };
       for (const b of buttons) b.addEventListener('click', () => show(b.dataset.page));
 
       addEventListener('keydown', (e) => {
-        // Only a text field should swallow these. Testing for document.body
-        // meant the shortcuts died the moment a button took focus.
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         const at = { '1': 0, '2': 1, '3': 2 }[e.key];
         if (at !== undefined) show(buttons[at].dataset.page);
         else if (e.key === 'r') frame.src = frame.src;
-        // The header collapses rather than fades, so the ResizeObserver on the
-        // stage fires and the phone takes the reclaimed height.
         else if (e.key === 'f') document.body.dataset.chrome =
           document.body.dataset.chrome === 'on' ? 'off' : 'on';
       });
