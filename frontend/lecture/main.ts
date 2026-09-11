@@ -666,6 +666,34 @@ function progress(label: string): () => void {
   return () => window.clearInterval(timer);
 }
 
+/**
+ * Turn yt-dlp's stderr into something a reader can act on.
+ *
+ * Two problems with passing it straight through. It arrives with the terminal
+ * COLOUR CODES still in it — the status line was printing a literal
+ * `[0;31mERROR:[0m` — and the useful sentence is buried in a
+ * paragraph of links about exporting cookies.
+ *
+ * The bot check is worth naming because it is not a fault in the URL or in this
+ * code, and the answer is different from every other failure here: it is the
+ * host being rate-limited, it clears on its own, and a local file goes on
+ * working the whole time.
+ */
+function explainFetchFailure(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  const clean = raw.replace(/\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim();
+  if (/not a bot|Sign in to confirm/i.test(clean)) {
+    return 'the video site is asking this computer to prove it is not a bot. ' +
+      'That is a limit on this network, not on the link — it usually lifts by itself. ' +
+      'Use Choose video… with a downloaded file in the meantime.';
+  }
+  if (/timed out|timeout|connection|reset by peer|Remote end closed/i.test(clean)) {
+    return 'the connection to the video site dropped. Try again, or use Choose video… with a local file.';
+  }
+  // Long enough to be a paragraph: keep the first sentence, drop the essay.
+  return clean.length > 200 ? `${clean.slice(0, 200)}…` : clean;
+}
+
 fetchBtn.addEventListener('click', async () => {
   const url = urlInput.value.trim();
   if (!url) return;
@@ -704,7 +732,7 @@ fetchBtn.addEventListener('click', async () => {
     const hint =
       error instanceof TypeError
         ? `no response from ${API} — is the lecture server running on port 8002?`
-        : String(error);
+        : explainFetchFailure(String(error));
     statusEl.textContent = `Could not fetch that URL — ${hint}`;
   } finally {
     fetchBtn.disabled = false;
