@@ -1,0 +1,11 @@
+# offline/smplx — isolated deps for the SMPL-X comparison experiment.
+# Does NOT touch the root requirements.txt or the frontend. Install with:
+#   python -m pip install -r offline/smplx/requirements.txt
+#
+# Deliberately torch-free: we read the SMPL-X .npz arrays directly with numpy and
+# bake a SKINNED glTF, so the linear-blend-skinning "forward" runs in the browser
+# via standard glTF skinning. No torch, no GPU, no smplx package needed offline.
+# (Trade-off: SMPL-X pose-corrective blendshapes are omitted — see docs/SMPLX_EXPERIMENT.md.)
+
+numpy>=1.24
+pygltflib>=1.16
