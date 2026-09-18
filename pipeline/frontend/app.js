@@ -666,7 +666,7 @@ async function createVrmRenderer(host){
 
   const loader = new GLTFLoader();
   loader.register(p=> new VRMLoaderPlugin(p));
-  loader.load('/models/AvatarSample_C.vrm', (gltf)=>{
+  loader.load('/models/isl-avatar.vrm', (gltf)=>{
     vrm = gltf.userData.vrm;
     try{ VRMUtils.removeUnnecessaryVertices(vrm.scene); }catch{}
     try{ VRMUtils.combineSkeletons(vrm.scene); }catch{}

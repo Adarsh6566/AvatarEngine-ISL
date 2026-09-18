@@ -425,7 +425,7 @@ status.textContent = 'Loading avatar…';
 activity.show();
 
 new VrmLoader()
-  .load('/models/AvatarSample_C.vrm')
+  .load('/models/isl-avatar.vrm')
   .then((loaded) => {
     vrm = loaded;
     loaded.scene.position.y = 0.2;

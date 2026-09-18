@@ -38,7 +38,7 @@ const FALLBACK: AppConfig = {
     fingerspellFade: 0.25,
   },
   avatar: {
-    modelPath: '/models/AvatarSample_C.vrm',
+    modelPath: '/models/isl-avatar.vrm',
     concurrency: 6,
     wordPriority: ['HELLO', 'THANKYOU', 'PLEASE', 'SORRY', 'YES', 'NO', 'ME', 'YOU', 'BYE'],
   },

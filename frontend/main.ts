@@ -183,7 +183,6 @@ avatar
     signBar.setEnabled(true);
     activity.hide();
     signBar.focus();
-    avatar.setExpression('happy');
   })
   .catch((error: unknown) => {
     console.error('[avatar-engine]', error);

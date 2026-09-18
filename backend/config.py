@@ -41,7 +41,7 @@ _DEFAULTS = {
         "default_speed": 1,
     },
     "avatar": {
-        "model_path": "/models/AvatarSample_C.vrm",
+        "model_path": "/models/isl-avatar.vrm",
         "concurrency": 6,
         "word_priority": ["HELLO", "THANKYOU", "PLEASE", "SORRY", "YES", "NO", "ME", "YOU", "BYE"],
     },

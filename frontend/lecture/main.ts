@@ -769,7 +769,7 @@ transcribeBtn.addEventListener('click', async () => {
 
 // --- boot --------------------------------------------------------------------
 new VrmLoader()
-  .load('/models/AvatarSample_C.vrm')
+  .load('/models/isl-avatar.vrm')
   .then((loaded) => {
     vrm = loaded;
     loaded.scene.position.y = 0.2;
