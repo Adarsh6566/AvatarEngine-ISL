@@ -46,7 +46,7 @@ animation:
   default_speed: 1
 
 avatar:
-  model_path: "/models/AvatarSample_C.vrm"
+  model_path: "/models/isl-avatar.vrm"
   concurrency: 6
   # Word signs prioritized first during load (core vocab).
   word_priority: ["HELLO", "THANKYOU", "PLEASE", "SORRY", "YES", "NO", "ME", "YOU", "BYE"]

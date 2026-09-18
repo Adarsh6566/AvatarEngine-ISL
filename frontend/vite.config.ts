@@ -54,7 +54,7 @@ function frontendConfigFromYaml() {
         fingerspellFade: getNum(/fingerspell:\s*\n[\s\S]*?fade_seconds:\s*([\d.]+)/, 0.25),
       },
       avatar: {
-        modelPath: get(/model_path:\s*"?([^"\n]+)"?/, '/models/AvatarSample_C.vrm'),
+        modelPath: get(/model_path:\s*"?([^"\n]+)"?/, '/models/isl-avatar.vrm'),
         concurrency: getNum(/avatar:\s*\n[\s\S]*?concurrency:\s*(\d+)/, 6),
         wordPriority: (() => {
           const m = t.match(/word_priority:\s*\[([^\]]+)\]/);

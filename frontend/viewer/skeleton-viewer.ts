@@ -46,7 +46,7 @@ controls.enableDamping = true;
 engine.onUpdate(() => controls.update());
 
 const renderer: SkeletonRenderer = useVrm
-  ? new VrmRenderer('/models/AvatarSample_C.vrm')
+  ? new VrmRenderer('/models/isl-avatar.vrm')
   : new NeonLineRenderer();
 renderer.attach(engine);
 const player = new SkeletonPlayer(renderer);
